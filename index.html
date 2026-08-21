@@ -2902,57 +2902,91 @@ async function traiterTicketOCR(imageData){
 
 function extraireArticlesTicket(texte){
   const articles = [];
-  const lignes = texte.split('\n').map(l => l.trim()).filter(l => l);
   
-  // Patterns pour montants en euros - PLUS FLEXIBLE
+  // Nettoyage initial : normaliser les caractères OCR mal reconnus
+  let texteNettoy = texte
+    .replace(/l/g, '1')  // 'l' minuscule → '1' (OCR confond souvent)
+    .replace(/O/g, '0')  // 'O' → '0' quand c'est un zéro
+    .replace(/[\u00A0]/g, ' ');  // Espaces non-cassants → espaces normaux
+  
+  const lignes = texteNettoy.split('\n').map(l => l.trim()).filter(l => l);
+  
+  // STRATÉGIE 1 : Montants à la fin (format normal : "Produit 5,99€")
   const regexMontantFin = /(\d+[.,]\d{2})\s*€?\s*$/i;
-  const regexMontantPartout = /(\d+[.,]\d{2})/g;
   
-  // Mots à ignorer (headers, footers, lignes vides)
-  const ignorer = /^(TOTAL|MONTANT|TVA|TICKET|CAISSE|DATE|HEURE|NUMERO|MERCI|BIENVENUE|SOUS.TOTAL|REMISE|DISCOUNT|RECU|FACTURE|ANNULE|CANCELLED|ENCAISSEMENT|PAIEMENT|TRANSACTION|SOLDE)/i;
-  const lignesSymboles = /^[-=*\s_]+$/;
+  // STRATÉGIE 2 : Montants au milieu (format : "5,99€ Produit")
+  const regexMontantDebut = /^(\d+[.,]\d{2})\s*€?\s*/i;
+  
+  // STRATÉGIE 3 : Montants partout (fallback)
+  const regexMontantPartout = /(\d+[.,]\d{2})/;
+  
+  // Mots à ignorer AUGMENTÉS
+  const ignorer = /^(TOTAL|MONTANT|TVA|TICKET|CAISSE|DATE|HEURE|NUMERO|MERCI|BIENVENUE|SOUS.?TOTAL|REMISE|DISCOUNT|RECU|FACTURE|ANNULE|CANCELLED|ENCAISSEMENT|PAIEMENT|TRANSACTION|SOLDE|PRIX|MODE|DEJA|PAYE|ESPECE|CARTE|CHEQUE|CHANGE|MERCI|BONNE|NUIT|JOUR|A BIENTOT)/i;
+  const lignesSymboles = /^[-=*\s_\.]+$/;
   
   lignes.forEach(ligne => {
-    // Ignorer lignes de headers/footers
     if(ignorer.test(ligne)) return;
     if(lignesSymboles.test(ligne)) return;
     if(ligne.length < 3) return;
     
-    // NOUVEAU : Chercher montant à la fin de la ligne (meilleure approche)
-    const matchFin = ligne.match(regexMontantFin);
+    let montant = null;
+    let nom = null;
     
-    if(matchFin){
-      const montant = parseFloat(matchFin[1].replace(',', '.'));
+    // STRATÉGIE 1 : Montant à la fin (PRIORITÉ)
+    let match = ligne.match(regexMontantFin);
+    if(match){
+      montant = parseFloat(match[1].replace(',', '.'));
+      nom = ligne.replace(regexMontantFin, '').trim();
+    }
+    
+    // STRATÉGIE 2 : Montant au début (FALLBACK)
+    if(!montant){
+      match = ligne.match(regexMontantDebut);
+      if(match){
+        montant = parseFloat(match[1].replace(',', '.'));
+        nom = ligne.replace(regexMontantDebut, '').trim();
+      }
+    }
+    
+    // STRATÉGIE 3 : Montant partout (DERNIER RECOURS)
+    if(!montant){
+      match = ligne.match(regexMontantPartout);
+      if(match){
+        montant = parseFloat(match[1].replace(',', '.'));
+        nom = ligne.replace(match[1], '').trim();
+      }
+    }
+    
+    // Si on a un montant, nettoyer le nom
+    if(montant && nom){
+      // Nettoyer le nom AGRESSIVEMENT
+      nom = nom
+        .replace(/^\d+\s*[xX×*]\s*/i, '')  // "2x Lait" → "Lait"
+        .replace(/^[\(\[].*?[\)\]]\s*/i, '')  // "(CODE123)" → ""
+        .replace(/^[A-Z0-9]{6,}\s*/i, '')  // Codes barres
+        .replace(/^\*+\s*/i, '')  // Astérisques
+        .replace(/\*+$/i, '')  // Astérisques fin
+        .replace(/[*#@!]/g, '')  // Caractères spéciaux OCR
+        .trim();
       
-      // Extraire le nom de l'article (tout avant le montant)
-      let nom = ligne.replace(regexMontantFin, '').trim();
-      
-      // Nettoyer le nom intelligemment
-      // Enlever quantités au début (1x, 2X, 3 x, etc.)
-      nom = nom.replace(/^\d+\s*[xX×]\s*/i, '');
-      // Enlever codes magasin/produit au début (entre parenthèses)
-      nom = nom.replace(/^\([^)]*\)\s*/i, '');
-      // Enlever codes barres ou références courtes au début
-      nom = nom.replace(/^[A-Z]{1,2}\d{6,}\s*/i, '');
-      nom = nom.trim();
-      
-      // NOUVEAU : Valider que c'est un vrai article
-      if(nom && montant > 0 && montant < 1000 && nom.length > 1){
-        // Le nom doit avoir au moins une lettre (pas juste des chiffres/symboles)
-        if(/[a-zA-ZÀ-ÿ]/.test(nom)){
-          // Éviter les doublons stricts (même nom)
+      // Valider l'article
+      if(nom && montant > 0 && montant < 2000 && nom.length > 1){
+        // Le nom DOIT avoir au moins UNE LETTRE
+        if(/[a-zA-ZÀ-ÿ\u00C0-\u017F]/.test(nom)){
+          // Vérifier qu'on n'a pas déjà cet article
           const existe = articles.some(a => 
             a.nom.toLowerCase() === nom.toLowerCase() ||
-            (a.nom.substring(0,15).toLowerCase() === nom.substring(0,15).toLowerCase() && 
-             Math.abs(a.montant - montant) < 0.5)
+            (a.nom.substring(0,12).toLowerCase() === nom.substring(0,12).toLowerCase() && 
+             Math.abs(a.montant - montant) < 0.3)  // Tolérance 30 centimes
           );
           
           if(!existe){
             articles.push({
-              nom: nom.substring(0, 80), // Garder jusqu'à 80 caractères
+              nom: nom.substring(0, 100),  // 100 caractères
               montant: montant,
               qte: 1,
-              id: Math.random().toString(36).substr(2,9)
+              id: Math.random().toString(36).substr(2,9),
+              source: 'ocr'
             });
           }
         }
@@ -2960,11 +2994,11 @@ function extraireArticlesTicket(texte){
     }
   });
   
-  // Trier par montant décroissant (articles chers en premier)
+  // Trier par montant décroissant
   articles.sort((a, b) => b.montant - a.montant);
   
-  // NOUVEAU : Limiter à 50 articles (un ticket n'en a rarement plus)
-  return articles.slice(0, 50);
+  // Limiter à 100 articles (très généreux)
+  return articles.slice(0, 100);
 }
 
 function afficherResultatOCR(articles, texteComplet){
