@@ -298,26 +298,93 @@ body.shop .card-acts{display:none}
   .chart-container{height:280px}.chart-wrapper{height:240px}
 }
 
-/* ======================== AUTH ======================== */
-#authScreen{position:fixed;top:0;left:0;right:0;bottom:0;background:var(--outremer);display:flex;align-items:center;justify-content:center;z-index:9999}
+/* ======================== AUTH — refonte design ======================== */
+#authScreen{
+  position:fixed;top:0;left:0;right:0;bottom:0;
+  background:linear-gradient(160deg,#1B34C4 0%,#2A1F9E 55%,#14181F 100%);
+  display:flex;align-items:center;justify-content:center;z-index:9999;
+  padding:24px;
+}
 #authScreen.hidden{display:none}
-.auth-box{background:var(--blanc);border-radius:16px;padding:40px;width:90%;max-width:320px;box-shadow:0 20px 60px rgba(0,0,0,.2)}
-.auth-box h1{font-size:24px;font-weight:700;margin-bottom:8px;text-align:center}
-.auth-box .subtitle{font-size:14px;color:var(--gris);text-align:center;margin-bottom:24px}
-.auth-box input{width:100%;padding:12px 14px;border:1px solid var(--gris-clair);border-radius:var(--r);font-size:16px;margin-bottom:16px;transition:border-color .15s}
-.auth-box input:focus{outline:none;border-color:var(--outremer)}
-.auth-box button{width:100%;padding:12px;border-radius:var(--r);background:var(--outremer);color:#fff;font-weight:700;cursor:pointer}
-.auth-box button:hover{background:#0f28a8}
-.auth-box .error{color:var(--rouge);font-size:13px;margin-bottom:12px;text-align:center;min-height:18px}
-.top .settings-btn{font-size:20px;cursor:pointer;padding:4px 8px;border-radius:6px}
-.top .settings-btn:hover{background:var(--craie)}
+#authScreen::before{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(circle at 30% 20%,rgba(255,255,255,.08),transparent 55%);
+  pointer-events:none;
+}
+.auth-box{
+  position:relative;
+  background:rgba(255,255,255,.97);
+  backdrop-filter:blur(20px);
+  border-radius:28px;
+  padding:36px 32px 32px;
+  width:100%;max-width:340px;
+  box-shadow:0 24px 70px rgba(0,0,0,.35),0 2px 8px rgba(0,0,0,.1);
+  animation:authRise .5s cubic-bezier(.2,.9,.25,1) backwards;
+}
+@keyframes authRise{from{opacity:0;transform:translateY(18px) scale(.97)}to{opacity:1;transform:none}}
+.auth-icon{
+  width:64px;height:64px;margin:0 auto 18px;border-radius:18px;
+  background:linear-gradient(155deg,var(--outremer),#3A4FE0);
+  display:grid;place-items:center;font-size:28px;
+  box-shadow:0 8px 20px rgba(27,52,196,.35);
+}
+.auth-box h1{font-size:22px;font-weight:800;text-align:center;letter-spacing:-0.02em;color:var(--encre)}
+.auth-box .subtitle{font-size:14px;color:var(--gris);text-align:center;margin:4px 0 26px;font-weight:500}
+.auth-field{position:relative;margin-bottom:14px}
+.auth-box input{
+  width:100%;padding:15px 46px 15px 16px;
+  border:1.5px solid var(--gris-clair);border-radius:16px;
+  font-size:16px;background:var(--craie);
+  transition:border-color .18s,background .18s,box-shadow .18s;
+}
+.auth-box input:focus{outline:none;border-color:var(--outremer);background:var(--blanc);box-shadow:0 0 0 4px rgba(27,52,196,.1)}
+.auth-toggle{
+  position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  width:36px;height:36px;border-radius:10px;display:grid;place-items:center;
+  font-size:16px;color:var(--gris);cursor:pointer;background:none;border:none;
+  transition:background .15s;
+}
+.auth-toggle:active{background:var(--gris-clair)}
+.auth-box button.auth-submit{
+  width:100%;padding:15px;border-radius:16px;
+  background:var(--outremer);color:#fff;font-weight:700;font-size:16px;
+  cursor:pointer;transition:transform .12s,opacity .15s,background .15s;
+  box-shadow:0 6px 18px rgba(27,52,196,.28);
+}
+.auth-box button.auth-submit:active{transform:scale(.97);opacity:.9}
+.auth-box .error{
+  color:var(--rouge);font-size:13px;text-align:center;min-height:20px;
+  margin-bottom:2px;font-weight:600;
+}
+.auth-box .error:not(:empty){animation:shake .35s}
+@keyframes shake{20%,60%{transform:translateX(-5px)}40%,80%{transform:translateX(5px)}}
+@media (prefers-reduced-motion:reduce){.auth-box,.auth-box .error:not(:empty){animation:none}}
+
+.top .settings-btn{font-size:20px;cursor:pointer;padding:6px 10px;border-radius:12px;transition:background .15s}
+.top .settings-btn:active{background:var(--gris-clair)}
 </style>
 <body>
-<div id="authScreen" class=""><div class="auth-box"><h1>Vie Perso</h1><div class="subtitle">Accès sécurisé</div><div id="authError" class="error"></div><input id="authPassword" type="password" placeholder="Mot de passe" autocomplete="off"><button onclick="verifyPassword()">Se connecter</button></div></div><div id="dashboardContent" style="display:none">
+<div id="authScreen" class="">
+  <div class="auth-box">
+    <div class="auth-icon">🔒</div>
+    <h1>Vie Perso</h1>
+    <div class="subtitle">Accès sécurisé</div>
+    <div id="authError" class="error"></div>
+    <div class="auth-field">
+      <input id="authPassword" type="password" placeholder="Mot de passe" autocomplete="off">
+      <button type="button" class="auth-toggle" onclick="toggleAuthVisibility()" title="Afficher/masquer">👁️</button>
+    </div>
+    <button class="auth-submit" onclick="verifyPassword()">Se connecter</button>
+  </div>
+</div>
+<div id="dashboardContent" style="display:none">
 
 <div class="top">
-  <h1 id="titrePage">Vie Perso</h1>
-  <div class="date" id="dateJour"></div>
+  <h1 id="titrePage">Vie Perso <span style="font-size:11px;color:var(--gris);font-weight:400">v6</span></h1>
+  <div style="display:flex;align-items:center;gap:8px">
+    <div class="date" id="dateJour"></div>
+    <button class="settings-btn" onclick="openSettingsPanel()" title="Paramètres">⚙️</button>
+  </div>
 </div>
 
 <div class="wrap">
@@ -355,6 +422,14 @@ body.shop .card-acts{display:none}
 <script>
 
 // ======================== AUTHENTIFICATION ========================
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  const authInput = document.getElementById('authPassword');
+  if (authInput && authInput.offsetParent !== null) { verifyPassword(); return; }
+  const p2 = document.getElementById('p2');
+  if (p2 && p2.offsetParent !== null) { changePassword(); }
+});
+
 async function hashPassword(pwd) {
   const enc = new TextEncoder();
   const buf = await crypto.subtle.digest('SHA-256', enc.encode(pwd));
@@ -369,18 +444,30 @@ async function initAuth() {
 }
 
 async function verifyPassword() {
+  const btn = document.querySelector('.auth-submit');
   const pwd = document.getElementById('authPassword').value;
   const err = document.getElementById('authError');
   if (!pwd) { err.textContent = 'Mot de passe requis'; return; }
+  if (btn) { btn.textContent = 'Vérification…'; btn.style.opacity = '.7'; }
   const h = await hashPassword(pwd);
   if (h === localStorage.getItem('viePersoPassword')) {
     localStorage.setItem('viePersoAuthenticated', 'true');
     document.getElementById('authScreen').classList.add('hidden');
     document.getElementById('dashboardContent').style.display = 'block';
   } else {
-    err.textContent = 'Incorrect';
+    err.textContent = 'Mot de passe incorrect';
     document.getElementById('authPassword').value = '';
+    document.getElementById('authPassword').focus();
+    if (btn) { btn.textContent = 'Se connecter'; btn.style.opacity = '1'; }
   }
+}
+
+function toggleAuthVisibility(){
+  const input = document.getElementById('authPassword');
+  const btn = document.querySelector('.auth-toggle');
+  if(input.type === 'password'){ input.type = 'text'; btn.textContent = '🙈'; }
+  else { input.type = 'password'; btn.textContent = '👁️'; }
+  input.focus();
 }
 
 function showAuth() {
@@ -398,11 +485,18 @@ async function checkAuth() {
 function openSettingsPanel() {
   const s = document.getElementById('sheet');
   const v = document.getElementById('veil');
-  let h = '<div class="sheet-hd"><h2>Paramètres</h2><button onclick="closeSettings()" style="cursor:pointer">✕</button></div><div class="sheet-bd">';
-  h += '<input id="p1" type="password" placeholder="Nouveau mot de passe" style="width:100%;padding:12px;margin-bottom:12px;border:1px solid var(--gris-clair);border-radius:var(--r)">';
-  h += '<input id="p2" type="password" placeholder="Confirmer" style="width:100%;padding:12px;margin-bottom:12px;border:1px solid var(--gris-clair);border-radius:var(--r)">';
-  h += '<button onclick="changePassword()" style="width:100%;padding:12px;background:var(--outremer);color:#fff;cursor:pointer;border-radius:var(--r);margin-bottom:12px">Mettre à jour</button>';
-  h += '<button onclick="logout()" style="width:100%;padding:12px;background:var(--rouge);color:#fff;cursor:pointer;border-radius:var(--r)">Déconnecter</button>';
+  let h = '<div class="sheet-hd"><h2>Paramètres</h2><button onclick="closeSettings()" style="cursor:pointer">✕</button></div>';
+  h += '<div class="sheet-bd">';
+  h += '<div style="text-align:center;margin-bottom:22px">';
+  h += '<div class="auth-icon" style="margin-bottom:10px">🔑</div>';
+  h += '<div style="font-size:15px;font-weight:700;color:var(--encre)">Changer le mot de passe</div>';
+  h += '<div style="font-size:13px;color:var(--gris);margin-top:2px">Au moins 4 caractères</div>';
+  h += '</div>';
+  h += '<div id="settingsError" style="color:var(--rouge);font-size:13px;text-align:center;min-height:18px;font-weight:600;margin-bottom:4px"></div>';
+  h += '<div class="auth-field"><input id="p1" type="password" placeholder="Nouveau mot de passe"></div>';
+  h += '<div class="auth-field"><input id="p2" type="password" placeholder="Confirmer le mot de passe"></div>';
+  h += '<button class="auth-submit" onclick="changePassword()" style="margin-bottom:12px">Mettre à jour</button>';
+  h += '<button onclick="logout()" style="width:100%;padding:15px;background:var(--blanc);border:1.5px solid var(--rouge);color:var(--rouge);font-weight:700;font-size:15px;border-radius:16px;cursor:pointer;transition:background .15s" onmousedown="this.style.background=\'#fdf0ee\'" onmouseup="this.style.background=\'var(--blanc)\'">Se déconnecter</button>';
   h += '</div>';
   s.innerHTML = h;
   v.classList.remove('hidden');
@@ -412,18 +506,19 @@ function openSettingsPanel() {
 async function changePassword() {
   const p1 = document.getElementById('p1').value;
   const p2 = document.getElementById('p2').value;
-  if (!p1 || p1 !== p2 || p1.length < 4) { alert('Erreur'); return; }
+  const err = document.getElementById('settingsError');
+  if (!p1 || !p2) { err.textContent = 'Veuillez remplir les deux champs'; return; }
+  if (p1 !== p2) { err.textContent = 'Les mots de passe ne correspondent pas'; return; }
+  if (p1.length < 4) { err.textContent = 'Minimum 4 caractères'; return; }
   const h = await hashPassword(p1);
   localStorage.setItem('viePersoPassword', h);
-  alert('Mis à jour !');
   closeSettings();
+  toast('Mot de passe mis à jour');
 }
 
 function logout() {
-  if (confirm('Sûr ?')) {
-    localStorage.removeItem('viePersoAuthenticated');
-    location.reload();
-  }
+  localStorage.removeItem('viePersoAuthenticated');
+  location.reload();
 }
 
 function closeSettings() {
