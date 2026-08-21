@@ -418,6 +418,16 @@ body.shop .card-acts{display:none}
 
 <input type="file" id="fotoInput" accept="image/*" capture="environment" class="vh">
 
+<button id="micBtn" onclick="lancerEcouteVocale()" title="Assistant vocal" style="position:fixed;right:18px;bottom:calc(96px + env(safe-area-inset-bottom));width:56px;height:56px;border-radius:50%;background:var(--outremer);color:#fff;font-size:22px;box-shadow:0 6px 20px rgba(46,75,214,.4);z-index:70;display:grid;place-items:center;transition:transform .15s,background .2s">🎤</button>
+<div id="micOverlay" style="position:fixed;inset:0;background:rgba(20,24,31,.55);z-index:80;display:none;align-items:center;justify-content:center;padding:24px">
+  <div style="background:var(--blanc);border-radius:24px;padding:32px 28px;width:100%;max-width:320px;text-align:center;box-shadow:0 24px 70px rgba(0,0,0,.3)">
+    <div id="micPulse" style="width:72px;height:72px;border-radius:50%;background:var(--outremer);display:grid;place-items:center;font-size:30px;margin:0 auto 18px;animation:micPulse 1.4s ease-in-out infinite">🎤</div>
+    <div id="micStatus" style="font-size:15px;font-weight:700;color:var(--encre);margin-bottom:6px">Je vous écoute…</div>
+    <div id="micTranscript" style="font-size:13.5px;color:var(--gris);min-height:20px;margin-bottom:18px">Dites une commande</div>
+    <button onclick="fermerEcouteVocale()" style="width:100%;padding:13px;border-radius:14px;background:var(--craie);border:1px solid var(--gris-clair);font-weight:700;font-size:14px">Annuler</button>
+  </div>
+</div>
+<style>@keyframes micPulse{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(46,75,214,.4)}50%{transform:scale(1.08);box-shadow:0 0 0 14px rgba(46,75,214,0)}}</style>
 <div class="veil" id="veil"></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true"></div>
 <div class="toast" id="toast"><span id="toastMsg"></span><button id="toastUndo">Annuler</button></div>
@@ -533,6 +543,124 @@ function closeSettings() {
 }
 
 // Vérifier auth AVANT d'initialiser le dashboard
+// ======================== ASSISTANT VOCAL ========================
+let reconnaissanceVocale = null;
+let vocalEnCours = false;
+
+function supporteReconnaissanceVocale(){
+  return ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window);
+}
+
+function lancerEcouteVocale(){
+  if(!supporteReconnaissanceVocale()){
+    document.getElementById('micOverlay').style.display = 'flex';
+    document.getElementById('micStatus').textContent = 'Non disponible';
+    document.getElementById('micTranscript').textContent = 'La reconnaissance vocale n\'est pas supportée par ce navigateur.';
+    document.getElementById('micPulse').style.animation = 'none';
+    return;
+  }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  reconnaissanceVocale = new SR();
+  reconnaissanceVocale.lang = 'fr-FR';
+  reconnaissanceVocale.continuous = false;
+  reconnaissanceVocale.interimResults = true;
+
+  document.getElementById('micOverlay').style.display = 'flex';
+  document.getElementById('micStatus').textContent = 'Je vous écoute…';
+  document.getElementById('micTranscript').textContent = 'Dites une commande';
+  document.getElementById('micPulse').style.animation = 'micPulse 1.4s ease-in-out infinite';
+  vocalEnCours = true;
+
+  reconnaissanceVocale.onresult = (e) => {
+    let texte = '';
+    for(let i=0;i<e.results.length;i++) texte += e.results[i][0].transcript;
+    document.getElementById('micTranscript').textContent = texte;
+    if(e.results[0].isFinal){
+      traiterCommandeVocale(texte.trim());
+    }
+  };
+  reconnaissanceVocale.onerror = (e) => {
+    document.getElementById('micStatus').textContent = 'Erreur';
+    document.getElementById('micTranscript').textContent = e.error === 'not-allowed' ? 'Accès au micro refusé.' : 'Impossible de comprendre, réessayez.';
+    document.getElementById('micPulse').style.animation = 'none';
+    vocalEnCours = false;
+  };
+  reconnaissanceVocale.onend = () => { vocalEnCours = false; };
+  reconnaissanceVocale.start();
+}
+
+function fermerEcouteVocale(){
+  if(reconnaissanceVocale && vocalEnCours){ try{ reconnaissanceVocale.stop(); }catch(e){} }
+  document.getElementById('micOverlay').style.display = 'none';
+}
+
+function parlerReponse(texte){
+  if(!('speechSynthesis' in window)) return;
+  const u = new SpeechSynthesisUtterance(texte);
+  u.lang = 'fr-FR';
+  u.rate = 1.05;
+  window.speechSynthesis.speak(u);
+}
+
+function confirmerVocal(texte){
+  document.getElementById('micStatus').textContent = '✓ ' + texte;
+  document.getElementById('micPulse').style.animation = 'none';
+  parlerReponse(texte);
+  setTimeout(fermerEcouteVocale, 1400);
+}
+
+// Extrait le nom d'article après un mot déclencheur, en retirant les articles/déterminants
+function extraireNom(texte, motsDeclencheurs){
+  let t = texte.toLowerCase();
+  motsDeclencheurs.forEach(m => { t = t.replace(m, ''); });
+  t = t.replace(/^(des|du|de la|de l'|un|une|le|la|les|l')\s+/i, '').trim();
+  return t;
+}
+
+function traiterCommandeVocale(texteBrut){
+  const t = texteBrut.toLowerCase().trim();
+
+  // AJOUT FRIGO
+  if(/ajoute.*frigo|mets.*frigo|frigo.*ajoute/.test(t)){
+    const nom = extraireNom(t, ['ajoute au frigo','ajoute dans le frigo','mets au frigo','mets dans le frigo','ajoute','au frigo','dans le frigo','frigo']);
+    if(nom){
+      D.frigo.push({ id:uid(), nom:nom, dlc:isoDansJours(7), categorie:'Autre', photo:'' });
+      sauver(); rendre();
+      confirmerVocal(nom+' ajouté au frigo');
+      return;
+    }
+  }
+
+  // AJOUT COURSES
+  if(/ajoute.*courses|liste de courses|mets.*courses|courses.*ajoute/.test(t)){
+    const nom = extraireNom(t, ['ajoute aux courses','ajoute à la liste de courses','ajoute a la liste de courses','mets aux courses','ajoute','aux courses','à la liste de courses','a la liste de courses','courses']);
+    if(nom){
+      D.courses.push({ id:uid(), nom:nom, qte:'', rayon: (typeof devinerRayon==='function'?devinerRayon(nom):'Autre'), habituel:false, fait:false });
+      sauver(); rendre();
+      confirmerVocal(nom+' ajouté aux courses');
+      return;
+    }
+  }
+
+  // AJOUT TÂCHE
+  if(/ajoute.*tâche|ajoute.*tache|nouvelle tâche|nouvelle tache|rappelle.moi de|n'oublie pas de/.test(t)){
+    const nom = extraireNom(t, ['ajoute une tâche','ajoute une tache','nouvelle tâche','nouvelle tache','rappelle-moi de','rappelle moi de',"n'oublie pas de",'ajoute']);
+    if(nom){
+      D.taches.push({ id:uid(), titre:nom, notes:'', echeance:'', priorite:'normale', recurrence:'aucune', fait:false });
+      sauver(); rendre();
+      confirmerVocal('Tâche ajoutée : '+nom);
+      return;
+    }
+  }
+
+  // Commande non reconnue
+  document.getElementById('micStatus').textContent = 'Non compris';
+  document.getElementById('micTranscript').textContent = 'Essayez : "ajoute des tomates au frigo"';
+  document.getElementById('micPulse').style.animation = 'none';
+  parlerReponse('Je n\'ai pas compris la commande');
+  setTimeout(fermerEcouteVocale, 2200);
+}
+
 checkAuth();
 
 
@@ -1239,7 +1367,7 @@ function rendreQuotidien(){
 }
 
 function vueDomaineQuotidien(){
-  return '<div class="quick"><input id="quickInput" type="text" autocomplete="off" enterkeyhint="done"><button id="quickAdd">Ajouter</button></div>'
+  return '<div class="quick"><input id="quickInput" type="text" autocomplete="off" enterkeyhint="done"><button id="micQuick" class="mic-btn" title="Dicter">🎤</button><button id="quickAdd">Ajouter</button></div>'
     + '<div class="hint" id="quickHint"></div>'
     + '<div class="tabs" id="sousTabs" role="tablist">'
     + '<button class="tab" role="tab" data-tab="jour" aria-selected="true">Aujourd\'hui</button>'
@@ -1466,7 +1594,7 @@ function vueSanteJournal(){
     + '<div class="kpi"><div class="v">'+dureeSemaine+'</div><div class="l">min / 7j</div></div>'
     + '<div class="kpi'+(sommeilMoy!==null && sommeilMoy<7?" warn":"")+'"><div class="v">'+(sommeilMoy!==null?sommeilMoy.toFixed(1):"—")+'</div><div class="l">h sommeil moy.</div></div>'
     + '</div>';
-  h += '<div class="quick"><input id="quickInput" type="text" autocomplete="off" enterkeyhint="done" placeholder="Ex. « course 40 min » ou « sommeil 7h30 »"><button id="quickAdd">Ajouter</button></div>'
+  h += '<div class="quick"><input id="quickInput" type="text" autocomplete="off" enterkeyhint="done" placeholder="Ex. « course 40 min » ou « sommeil 7h30 »"><button id="micQuick" class="mic-btn" title="Dicter">🎤</button><button id="quickAdd">Ajouter</button></div>'
     + '<div class="hint">Type deviné depuis le texte : « sommeil », « poids », sinon exercice.</div>';
 
   const l = D.sante.slice().sort((a,b)=>b.date.localeCompare(a.date));
@@ -2336,7 +2464,87 @@ const RECETTES = [
   { id:"rec_017", titre:"Ratatouille", ingredients:["aubergines","courgettes","tomates","oignon","ail","huile d'olive","herbes"], temps:"40 min", difficulte:"moyen" },
   { id:"rec_018", titre:"Omelette fines herbes", ingredients:["œufs","persil","ciboulette","beurre","sel","poivre"], temps:"8 min", difficulte:"facile" },
   { id:"rec_019", titre:"Tarte tatin tomate", ingredients:["tomates","oignons","pâte feuilletée","beurre","sucre","herbes"], temps:"35 min", difficulte:"moyen" },
-  { id:"rec_020", titre:"Pâtes à la bolognaise", ingredients:["pâtes","viande hachée","tomates","oignon","ail","carotte","huile d'olive"], temps:"30 min", difficulte:"facile" }
+  { id:"rec_020", titre:"Pâtes à la bolognaise", ingredients:["pâtes","viande hachée","tomates","oignon","ail","carotte","huile d'olive"], temps:"30 min", difficulte:"facile" },
+  { id:"rec_021", titre:"Poulet rôti aux herbes", ingredients:["poulet","ail","thym","beurre","sel","poivre"], temps:"1h", difficulte:"moyen" },
+  { id:"rec_022", titre:"Escalopes de poulet à la crème", ingredients:["poulet","crème","champignons","oignon","sel","poivre"], temps:"25 min", difficulte:"facile" },
+  { id:"rec_023", titre:"Curry de poulet", ingredients:["poulet","lait de coco","curry","oignon","ail","riz"], temps:"35 min", difficulte:"moyen" },
+  { id:"rec_024", titre:"Poulet basquaise", ingredients:["poulet","poivrons","tomates","oignon","ail","riz"], temps:"45 min", difficulte:"moyen" },
+  { id:"rec_025", titre:"Saumon grillé citron", ingredients:["saumon","citron","huile d'olive","sel","poivre","herbes"], temps:"15 min", difficulte:"facile" },
+  { id:"rec_026", titre:"Cabillaud au four", ingredients:["cabillaud","tomates","olives","ail","huile d'olive","citron"], temps:"25 min", difficulte:"facile" },
+  { id:"rec_027", titre:"Risotto aux champignons", ingredients:["riz","champignons","bouillon","oignon","parmesan","beurre"], temps:"35 min", difficulte:"moyen" },
+  { id:"rec_028", titre:"Riz sauté aux légumes", ingredients:["riz","carotte","poivrons","œufs","sauce soja","oignon"], temps:"20 min", difficulte:"facile" },
+  { id:"rec_029", titre:"Chili con carne", ingredients:["viande hachée","haricots rouges","tomates","oignon","ail","piment"], temps:"40 min", difficulte:"moyen" },
+  { id:"rec_030", titre:"Steak haché sauce poivre", ingredients:["viande hachée","crème","poivre","beurre","échalote"], temps:"15 min", difficulte:"facile" },
+  { id:"rec_031", titre:"Rôti de porc aux pommes", ingredients:["porc","pommes","oignon","beurre","miel","sel"], temps:"1h", difficulte:"moyen" },
+  { id:"rec_032", titre:"Sauté de porc au caramel", ingredients:["porc","sauce soja","sucre","ail","gingembre","riz"], temps:"25 min", difficulte:"moyen" },
+  { id:"rec_033", titre:"Soupe de légumes maison", ingredients:["carotte","poireau","pomme de terre","oignon","bouillon","crème"], temps:"35 min", difficulte:"facile" },
+  { id:"rec_034", titre:"Purée maison", ingredients:["pomme de terre","beurre","lait","sel","poivre"], temps:"30 min", difficulte:"facile" },
+  { id:"rec_035", titre:"Gratin dauphinois", ingredients:["pomme de terre","crème","lait","ail","fromage","sel"], temps:"1h", difficulte:"moyen" },
+  { id:"rec_036", titre:"Salade de lentilles", ingredients:["lentilles","carotte","oignon","vinaigre","huile d'olive","herbes"], temps:"25 min", difficulte:"facile" },
+  { id:"rec_037", titre:"Dahl de lentilles", ingredients:["lentilles","lait de coco","curry","oignon","ail","gingembre"], temps:"30 min", difficulte:"facile" },
+  { id:"rec_038", titre:"Houmous maison", ingredients:["pois chiches","ail","citron","huile d'olive","sel"], temps:"10 min", difficulte:"facile" },
+  { id:"rec_039", titre:"Salade de pois chiches", ingredients:["pois chiches","tomates","oignon rouge","citron","huile d'olive","persil"], temps:"10 min", difficulte:"facile" },
+  { id:"rec_040", titre:"Wok de crevettes", ingredients:["crevettes","poivrons","carotte","sauce soja","ail","gingembre"], temps:"15 min", difficulte:"facile" },
+  { id:"rec_041", titre:"Tartiflette", ingredients:["pomme de terre","reblochon","lardons","oignon","crème"], temps:"45 min", difficulte:"moyen" },
+  { id:"rec_042", titre:"Soupe miso", ingredients:["miso","tofu","algues","oignon vert","bouillon"], temps:"15 min", difficulte:"facile" },
+  { id:"rec_043", titre:"Poêlée de légumes de saison", ingredients:["courgettes","poivrons","aubergines","oignon","ail","huile d'olive"], temps:"20 min", difficulte:"facile" },
+  { id:"rec_044", titre:"Tarte aux légumes", ingredients:["pâte brisée","courgettes","tomates","œufs","crème","fromage"], temps:"45 min", difficulte:"moyen" },
+  { id:"rec_045", titre:"Burger maison", ingredients:["viande hachée","pain burger","fromage","salade","tomates","oignon"], temps:"20 min", difficulte:"facile" },
+  { id:"rec_046", titre:"Wraps au poulet", ingredients:["poulet","tortillas","salade","tomates","fromage","sauce"], temps:"15 min", difficulte:"facile" },
+  { id:"rec_047", titre:"Pizza maison", ingredients:["pâte à pizza","tomates","fromage","jambon","champignons","huile d'olive"], temps:"30 min", difficulte:"moyen" },
+  { id:"rec_048", titre:"Crêpes salées jambon-fromage", ingredients:["farine","œufs","lait","jambon","fromage","beurre"], temps:"25 min", difficulte:"facile" },
+  { id:"rec_049", titre:"Yaourt aux fruits", ingredients:["yaourt","fruits","miel"], temps:"5 min", difficulte:"facile" },
+  { id:"rec_050", titre:"Compote de pommes", ingredients:["pommes","sucre","cannelle"], temps:"25 min", difficulte:"facile" },
+  { id:"rec_051", titre:"Salade de fruits frais", ingredients:["fruits","citron","menthe","sucre"], temps:"10 min", difficulte:"facile" },
+  { id:"rec_052", titre:"Bananes rôties au miel", ingredients:["bananes","miel","beurre","cannelle"], temps:"10 min", difficulte:"facile" },
+  { id:"rec_053", titre:"Blanquette de veau", ingredients:["veau","carotte","oignon","crème","bouillon","champignons"], temps:"1h30", difficulte:"moyen" },
+  { id:"rec_054", titre:"Bœuf bourguignon", ingredients:["bœuf","vin rouge","carotte","oignon","lardons","champignons"], temps:"2h30", difficulte:"difficile" },
+  { id:"rec_055", titre:"Pot-au-feu", ingredients:["bœuf","carotte","poireau","navet","pomme de terre","oignon"], temps:"3h", difficulte:"moyen" },
+  { id:"rec_056", titre:"Hachis parmentier", ingredients:["viande hachée","pomme de terre","oignon","beurre","lait","fromage"], temps:"50 min", difficulte:"moyen" },
+  { id:"rec_057", titre:"Couscous poulet", ingredients:["poulet","semoule","carotte","courgettes","pois chiches","bouillon"], temps:"1h", difficulte:"moyen" },
+  { id:"rec_058", titre:"Tajine d'agneau", ingredients:["agneau","abricots secs","oignon","cannelle","miel","amandes"], temps:"2h", difficulte:"difficile" },
+  { id:"rec_059", titre:"Moussaka", ingredients:["aubergines","viande hachée","tomates","béchamel","oignon","fromage"], temps:"1h15", difficulte:"difficile" },
+  { id:"rec_060", titre:"Paella", ingredients:["riz","poulet","crevettes","poivrons","tomates","safran"], temps:"50 min", difficulte:"moyen" },
+  { id:"rec_061", titre:"Osso bucco", ingredients:["veau","tomates","carotte","oignon","vin blanc","bouillon"], temps:"2h", difficulte:"difficile" },
+  { id:"rec_062", titre:"Escalope milanaise", ingredients:["veau","chapelure","œufs","parmesan","citron"], temps:"20 min", difficulte:"facile" },
+  { id:"rec_063", titre:"Lasagnes bolognaise", ingredients:["pâtes à lasagne","viande hachée","tomates","béchamel","fromage","oignon"], temps:"1h", difficulte:"moyen" },
+  { id:"rec_064", titre:"Pâtes pesto", ingredients:["pâtes","basilic","parmesan","pignons","ail","huile d'olive"], temps:"15 min", difficulte:"facile" },
+  { id:"rec_065", titre:"Risotto au safran", ingredients:["riz","safran","bouillon","oignon","parmesan","beurre"], temps:"35 min", difficulte:"moyen" },
+  { id:"rec_066", titre:"Gnocchis à la sauge", ingredients:["gnocchis","beurre","sauge","parmesan"], temps:"10 min", difficulte:"facile" },
+  { id:"rec_067", titre:"Focaccia maison", ingredients:["farine","levure","huile d'olive","romarin","sel"], temps:"1h30", difficulte:"moyen" },
+  { id:"rec_068", titre:"Bruschetta tomate", ingredients:["pain","tomates","ail","basilic","huile d'olive"], temps:"10 min", difficulte:"facile" },
+  { id:"rec_069", titre:"Minestrone", ingredients:["haricots","carotte","céleri","tomates","pâtes","bouillon"], temps:"40 min", difficulte:"facile" },
+  { id:"rec_070", titre:"Poulet teriyaki", ingredients:["poulet","sauce soja","miel","gingembre","ail","riz"], temps:"25 min", difficulte:"facile" },
+  { id:"rec_071", titre:"Nouilles sautées au bœuf", ingredients:["nouilles","bœuf","poivrons","sauce soja","ail","gingembre"], temps:"20 min", difficulte:"facile" },
+  { id:"rec_072", titre:"Riz cantonais", ingredients:["riz","œufs","jambon","petits pois","carotte","sauce soja"], temps:"20 min", difficulte:"facile" },
+  { id:"rec_073", titre:"Sushi maki concombre", ingredients:["riz à sushi","algues nori","concombre","vinaigre de riz"], temps:"40 min", difficulte:"moyen" },
+  { id:"rec_074", titre:"Ramen simple", ingredients:["nouilles ramen","bouillon","œufs","oignon vert","sauce soja"], temps:"25 min", difficulte:"moyen" },
+  { id:"rec_075", titre:"Poke bowl saumon", ingredients:["riz","saumon","avocat","concombre","sauce soja","sésame"], temps:"20 min", difficulte:"facile" },
+  { id:"rec_076", titre:"Bo bun poulet", ingredients:["vermicelles de riz","poulet","carotte","concombre","cacahuètes","menthe"], temps:"30 min", difficulte:"moyen" },
+  { id:"rec_077", titre:"Curry vert thaï", ingredients:["poulet","lait de coco","pâte de curry vert","aubergines","basilic thaï"], temps:"30 min", difficulte:"moyen" },
+  { id:"rec_078", titre:"Falafels maison", ingredients:["pois chiches","ail","persil","cumin","farine"], temps:"35 min", difficulte:"moyen" },
+  { id:"rec_079", titre:"Shakshuka", ingredients:["œufs","tomates","poivrons","oignon","cumin","paprika"], temps:"25 min", difficulte:"facile" },
+  { id:"rec_080", titre:"Tortilla espagnole", ingredients:["pomme de terre","œufs","oignon","huile d'olive","sel"], temps:"35 min", difficulte:"moyen" },
+  { id:"rec_081", titre:"Gaspacho", ingredients:["tomates","poivrons","concombre","ail","huile d'olive","vinaigre"], temps:"15 min", difficulte:"facile" },
+  { id:"rec_082", titre:"Salade César", ingredients:["salade","poulet","parmesan","croutons","sauce césar"], temps:"15 min", difficulte:"facile" },
+  { id:"rec_083", titre:"Salade grecque", ingredients:["tomates","concombre","feta","olives","oignon rouge","huile d'olive"], temps:"10 min", difficulte:"facile" },
+  { id:"rec_084", titre:"Salade de quinoa", ingredients:["quinoa","tomates","concombre","feta","citron","menthe"], temps:"20 min", difficulte:"facile" },
+  { id:"rec_085", titre:"Taboulé", ingredients:["semoule","persil","tomates","menthe","citron","huile d'olive"], temps:"20 min", difficulte:"facile" },
+  { id:"rec_086", titre:"Pâtes aux courgettes crème", ingredients:["pâtes","courgettes","crème","ail","parmesan"], temps:"20 min", difficulte:"facile" },
+  { id:"rec_087", titre:"Velouté de potiron", ingredients:["potiron","crème","oignon","bouillon","muscade"], temps:"35 min", difficulte:"facile" },
+  { id:"rec_088", titre:"Velouté de courgettes", ingredients:["courgettes","pomme de terre","oignon","bouillon","crème"], temps:"30 min", difficulte:"facile" },
+  { id:"rec_089", titre:"Soupe de poisson", ingredients:["poisson","tomates","fenouil","ail","bouillon","safran"], temps:"40 min", difficulte:"moyen" },
+  { id:"rec_090", titre:"Filet mignon sauce moutarde", ingredients:["porc","moutarde","crème","échalote","beurre"], temps:"30 min", difficulte:"moyen" },
+  { id:"rec_091", titre:"Chipolatas grillées", ingredients:["chipolatas","moutarde","salade","pain"], temps:"15 min", difficulte:"facile" },
+  { id:"rec_092", titre:"Brochettes de poulet", ingredients:["poulet","poivrons","oignon","huile d'olive","paprika"], temps:"25 min", difficulte:"facile" },
+  { id:"rec_093", titre:"Kebab maison", ingredients:["agneau","pain pita","salade","tomates","oignon","sauce blanche"], temps:"30 min", difficulte:"moyen" },
+  { id:"rec_094", titre:"Chakchouka aux merguez", ingredients:["merguez","tomates","poivrons","oignon","œufs","cumin"], temps:"30 min", difficulte:"moyen" },
+  { id:"rec_095", titre:"Pancakes", ingredients:["farine","œufs","lait","sucre","levure","beurre"], temps:"20 min", difficulte:"facile" },
+  { id:"rec_096", titre:"Gaufres maison", ingredients:["farine","œufs","lait","beurre","sucre"], temps:"25 min", difficulte:"facile" },
+  { id:"rec_097", titre:"Porridge aux fruits", ingredients:["flocons d'avoine","lait","fruits","miel","cannelle"], temps:"10 min", difficulte:"facile" },
+  { id:"rec_098", titre:"Granola maison", ingredients:["flocons d'avoine","miel","amandes","huile","noix"], temps:"35 min", difficulte:"facile" },
+  { id:"rec_099", titre:"Smoothie bowl", ingredients:["fruits","yaourt","granola","miel"], temps:"10 min", difficulte:"facile" },
+  { id:"rec_100", titre:"Tarte au citron", ingredients:["pâte sablée","citron","œufs","sucre","beurre"], temps:"50 min", difficulte:"moyen" }
 ];
 
 /* ======================= SCAN CODE-BARRES & SYNC FRIGO ↔ COURSES ======================= */
@@ -3027,6 +3235,14 @@ function vueDomaineFrigo(){
     + '<button class="btn-second" onclick="ouvrirMenuScan()" title="Scanner un code-barres">📷 Scanner un code</button>'
     + '</div></div>';
 
+  if(D.frigo.length){
+    h += '<button data-act="afficherRecettes" style="width:100%;display:flex;align-items:center;gap:12px;background:linear-gradient(135deg,var(--outremer),#4A5FE8);color:#fff;border-radius:16px;padding:14px 16px;margin-bottom:22px;box-shadow:0 4px 14px rgba(46,75,214,.25);text-align:left">'
+      + '<span style="font-size:26px">🍽️</span>'
+      + '<span style="flex:1"><span style="display:block;font-weight:700;font-size:15px">Recettes suggérées</span><span style="display:block;font-size:12.5px;opacity:.85">Basées sur votre frigo actuel</span></span>'
+      + '<span style="font-size:18px;opacity:.8">›</span>'
+      + '</button>';
+  }
+
   if(urgent.length){
     h += '<section class="sec alert"><div class="sec-hd"><span>À consommer en priorité</span><span class="count">'+urgent.length+'</span></div>';
     h += urgent.map(a => {
@@ -3051,10 +3267,6 @@ function vueDomaineFrigo(){
 
   if(!D.frigo.length){
     h += '<div class="empty"><strong>Frigo vide</strong><p>Ajoutez vos articles pour voir les recettes suggérées.</p></div>';
-  }else{
-    h += '<section class="sec"><div class="sec-hd"><span>Recettes suggérées</span></div>'
-      + '<p class="hint">Basées sur les articles du frigo, en priorité ceux près de la DLC.</p>'
-      + '<button class="btn-main" data-act="afficherRecettes" style="width:100%;margin-bottom:16px">Voir les recettes</button></section>';
   }
   
   h += '<div class="sec"><div class="sec-hd"><span>Outils v5</span></div>';
@@ -3129,23 +3341,44 @@ function afficherRecettes(){
   
   const scored = RECETTES.map(r => {
     let score = 0;
+    const manquants = [];
     r.ingredients.forEach(ing => {
       const ing_lower = ing.toLowerCase();
       if(urgent.some(u => u.includes(ing_lower))) score += 3;
       else if(ingredients_frigo.some(f => f.includes(ing_lower))) score += 1;
+      else manquants.push(ing);
     });
-    return { ...r, score: score };
-  }).filter(r => r.score > 0).sort((a,b) => b.score - a.score).slice(0,8);
+    return { ...r, score: score, manquants: manquants };
+  }).filter(r => r.score > 0).sort((a,b) => b.score - a.score).slice(0,15);
 
-  SHEET.innerHTML = '<div class="sheet-hd"><h2>Recettes suggérées</h2><button data-act="close">Fermer</button></div>'
-    + '<p class="hint">Basées sur les articles du frigo. Les recettes en haut utilisent les articles proches de la DLC.</p>'
-    + (scored.length===0 ? '<p class="note">Pas de recettes suggérées pour le moment.</p>' :
+  SHEET.innerHTML = '<div class="sheet-hd"><h2>🍽️ Recettes suggérées</h2><button data-act="close">Fermer</button></div>'
+    + '<p class="hint">Triées selon les articles de votre frigo — priorité à ceux proches de la DLC.</p>'
+    + (scored.length===0 ? '<p class="note">Pas de recettes suggérées pour le moment. Ajoutez plus d\'articles au frigo.</p>' :
       scored.map((r,i) => '<div class="prog-card">'
       + '<div class="prog-hd"><h3 style="margin:0">'+esc(r.titre)+'</h3></div>'
-      + '<div class="prog-meta"><span>'+esc(r.temps)+'</span><span>'+esc(r.difficulte)+'</span></div>'
-      + '<div style="font-size:13px;margin-bottom:12px;line-height:1.4"><strong>Ingrédients :</strong> '+esc(r.ingredients.join(", "))+'</div>'
-      + '</div>').join(''));
-  ouvrirSheet();
+      + '<div class="prog-meta"><span>⏱ '+esc(r.temps)+'</span><span>'+esc(r.difficulte)+'</span></div>'
+      + '<div style="font-size:13px;margin-bottom:8px;line-height:1.4"><strong>Ingrédients :</strong> '+esc(r.ingredients.join(", "))+'</div>'
+      + (r.manquants.length
+          ? '<div style="font-size:12.5px;color:var(--gris);margin-bottom:10px">🛒 Il vous manque : '+esc(r.manquants.join(", "))+'</div>'
+            + '<button class="btn-second" style="width:100%" onclick="ajouterManquantsCourses(\''+r.id+'\')">Ajouter les manquants aux courses</button>'
+          : '<div style="font-size:12.5px;color:var(--vert);font-weight:600">✓ Vous avez tout !</div>')
+      + '</div>').join(''));  ouvrirSheet();
+}
+
+function ajouterManquantsCourses(recetteId){
+  const r = RECETTES.find(x => x.id === recetteId);
+  if(!r) return;
+  const ingredients_frigo = D.frigo.map(a => a.nom.toLowerCase().split(' ')).flat();
+  let ajoutes = 0;
+  r.ingredients.forEach(ing => {
+    const ing_lower = ing.toLowerCase();
+    if(!ingredients_frigo.some(f => f.includes(ing_lower))){
+      const existe = D.courses.find(c => c.nom.toLowerCase() === ing_lower && !c.fait);
+      if(!existe){ D.courses.push({ id:uid(), nom:ing, qte:"", rayon:"Autre", habituel:false, fait:false }); ajoutes++; }
+    }
+  });
+  sauver(); rendre();
+  toast(ajoutes ? ajoutes+' article(s) ajouté(s) aux courses' : 'Déjà dans la liste de courses');
 }
 
 /* ======================= RENDU GLOBAL PAR DOMAINE ======================= */
