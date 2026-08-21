@@ -3298,8 +3298,31 @@ function validerTicketOCR(articlesJson){
       ean: null,
       articles: articles // Stocker les détails des articles
     });
-    
-    // Ajouter articles à la liste de courses
+
+    // Ajouter/mettre à jour le Frigo à partir des articles du ticket
+    // (jusqu'ici le scan de ticket ne mettait à jour que Budget + liste de courses,
+    // jamais le Frigo : c'est le principal manque signalé)
+    const dlcParDefautTicket = isoDansJours(7);
+    let nFrigoMaj = 0, nFrigoAjoutes = 0;
+    articles.forEach(a => {
+      const existant = D.frigo.find(x => x.nom.toLowerCase() === a.nom.toLowerCase());
+      const qteAchetee = a.qte || 1;
+      if(existant){
+        const qteExistante = parseFloat(String(existant.qte).replace(',', '.'));
+        existant.qte = !isNaN(qteExistante) ? String(qteExistante + qteAchetee) : String(qteAchetee);
+        existant.dlc = dlcParDefautTicket; // article racheté : on repart sur une DLC fraîche
+        nFrigoMaj++;
+      } else {
+        D.frigo.push({
+          id: uid(), nom: a.nom, qte: String(qteAchetee), categorie: devinerRayon(a.nom),
+          dlc: dlcParDefautTicket, photo: '', code: null,
+          kcal100: '', prot100: '', gluc100: '', lip100: '', sel100: ''
+        });
+        nFrigoAjoutes++;
+      }
+    });
+
+    // Ajouter articles à la liste de courses (historique "déjà acheté")
     articles.forEach(a => {
       const existing = D.courses.find(c => c.nom.toLowerCase().includes(a.nom.toLowerCase().substring(0,15)));
       if(!existing && a.montant < 100){ // Ne pas ajouter les gros achats en doublons
@@ -3318,7 +3341,7 @@ function validerTicketOCR(articlesJson){
     sauver();
     fermerFeuille();
     rendre();
-    toast('✓ Ticket ajouté au budget et à la liste');
+    toast('✓ Ticket ajouté : budget, frigo (' + nFrigoAjoutes + ' nouveau(x), ' + nFrigoMaj + ' mis à jour) et liste de courses');
   } catch(e) {
     toast('❌ Erreur lors du traitement');
     console.error(e);
