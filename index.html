@@ -499,7 +499,10 @@ function charger(){
         frigo:p.frigo||[], recettes_favorites:p.recettes_favorites||[],
         regles:p.regles||[], trousseRegles:p.trousseRegles||null,
         repas:p.repas||[], objectifsNutrition:p.objectifsNutrition||null,
-        depenses:p.depenses||[] };
+        depenses:p.depenses||[],
+        frigoSync: p.frigoSync || { autoSuggest: true },
+        stats: p.stats || { gaspille: 0 },
+        alertes: p.alertes || { expiration: true } };
     }
   }catch(e){ console.warn("Données illisibles", e); }
   migrerAncien();
@@ -2869,7 +2872,7 @@ async function traiterTicketOCR(imageData){
       logger: (progress) => {
         if(progress.status === 'recognizing'){
           const pct = Math.round(progress.progress * 100);
-          progressBar.style.width = Math.max(progress, 85) + '%';
+          progressBar.style.width = Math.max(pct, 85) + '%';
         }
       }
     });
@@ -2905,8 +2908,6 @@ function extraireArticlesTicket(texte){
   
   // Nettoyage initial : normaliser les caractères OCR mal reconnus
   let texteNettoy = texte
-    .replace(/l/g, '1')  // 'l' minuscule → '1' (OCR confond souvent)
-    .replace(/O/g, '0')  // 'O' → '0' quand c'est un zéro
     .replace(/[\u00A0]/g, ' ');  // Espaces non-cassants → espaces normaux
   
   const lignes = texteNettoy.split('\n').map(l => l.trim()).filter(l => l);
@@ -2963,7 +2964,7 @@ function extraireArticlesTicket(texte){
       nom = nom
         .replace(/^\d+\s*[xX×*]\s*/i, '')  // "2x Lait" → "Lait"
         .replace(/^[\(\[].*?[\)\]]\s*/i, '')  // "(CODE123)" → ""
-        .replace(/^[A-Z0-9]{6,}\s*/i, '')  // Codes barres
+        .replace(/^[A-Z0-9]{6,}\s*/, '')  // Codes barres (majuscules/chiffres uniquement)
         .replace(/^\*+\s*/i, '')  // Astérisques
         .replace(/\*+$/i, '')  // Astérisques fin
         .replace(/[*#@!]/g, '')  // Caractères spéciaux OCR
