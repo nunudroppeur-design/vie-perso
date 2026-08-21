@@ -2961,19 +2961,38 @@ function brancherSousSanteDOM(){
 let ocrEnCours = false;
 
 async function scannerTicket(){
+  // Important : sur Android (surtout en PWA installée sur l'écran d'accueil), un <input type=file>
+  // créé dynamiquement et JAMAIS attaché au DOM peut ouvrir le sélecteur/l'appareil photo sans que
+  // l'événement "change" ne revienne ensuite à la page — silence total, aucune erreur. On l'attache
+  // (caché) avant le click(), et on le retire une fois utilisé. C'est déjà comme ça que fonctionne
+  // le scan de code-barres (input#scanPhoto, statique dans le DOM), qui lui n'a pas ce souci.
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*';
+  input.style.display = 'none';
+  document.body.appendChild(input);
+
+  const nettoyer = () => { if(input.parentNode) input.parentNode.removeChild(input); };
+
   input.onchange = async (e) => {
     const file = e.target.files[0];
-    if(!file) return;
-    
+    if(!file){ nettoyer(); return; }
+
     const reader = new FileReader();
+    reader.onerror = () => {
+      console.error('Erreur lecture fichier ticket:', reader.error);
+      toast('❌ Impossible de lire la photo, réessayez');
+      nettoyer();
+    };
     reader.onload = async (ev) => {
+      nettoyer();
       await traiterTicketOCR(ev.target.result);
     };
     reader.readAsDataURL(file);
   };
+  // Si l'utilisateur annule le sélecteur (aucun fichier choisi), on retire quand même l'input :
+  // "change" ne se déclenche pas dans ce cas sur la plupart des navigateurs, d'où ce filet via "cancel".
+  input.oncancel = nettoyer;
   input.click();
 }
 
@@ -3777,7 +3796,13 @@ document.addEventListener("click", e => {
 /* ======================= EXPORT / IMPORT FICHIER GLOBAL ======================= */
 function brancherExportImport(){
   document.getElementById("btnExport").onclick = () => {
-    telecharger(new Blob([JSON.stringify(D,null,2)],{type:"application/json"}), "vie-perso-"+iso(new Date())+".json");
+    // La clé API Google Vision vit dans une entrée localStorage séparée de D (jamais
+    // écrite dans D lui-même) : on l'ajoute ici uniquement pour qu'elle survive à une
+    // réinstallation / un changement d'appareil / un vidage du stockage du navigateur.
+    // Attention : elle se retrouve donc en clair dans ce fichier JSON téléchargé.
+    const cleVision = getVisionApiKey();
+    const donneesExport = cleVision ? Object.assign({}, D, { _visionApiKeyGoogleVision: cleVision }) : D;
+    telecharger(new Blob([JSON.stringify(donneesExport,null,2)],{type:"application/json"}), "vie-perso-"+iso(new Date())+".json");
     toast("Fichier téléchargé");
   };
   document.getElementById("fileImport").onchange = e => {
@@ -3799,6 +3824,9 @@ function brancherExportImport(){
           D.trousseRegles = trousseParDefaut();
         }
         if(!D.objectifsNutrition) D.objectifsNutrition = objectifsNutritionParDefaut();
+        // Restaure la clé API Google Vision si le fichier de sauvegarde en contient une
+        // (sinon on garde celle déjà configurée sur cet appareil, on ne l'efface pas).
+        if(p._visionApiKeyGoogleVision) definirVisionApiKey(p._visionApiKeyGoogleVision);
         sauver(); rendre();
         toast("Fichier restauré", () => { D = avant; });
       }catch(err){ toast("Fichier illisible : ce n'est pas une sauvegarde valide"); }
@@ -3842,22 +3870,12 @@ document.addEventListener("paste", e => {
 
 // ===== OUTILS FRIGO v5 - SYNC + STATS + EXPORT =====
 
-function syncFrigoCoursesAuto() {
-  if(!D.frigoSync.autoSuggest) return;
-  const maintenant = ajd();
-  const dlcAlerte = new Date(maintenant);
-  dlcAlerte.setDate(dlcAlerte.getDate() + 3);
-  
-  D.frigo.forEach(a => {
-    if(a.dlc && new Date(a.dlc) < dlcAlerte && new Date(a.dlc) > maintenant) {
-      const existing = D.courses.find(c => c.nom.toLowerCase() === a.nom.toLowerCase() && !c.fait);
-      if(!existing) {
-        D.courses.push({ id:uid(), nom:a.nom+' (stock bas)', fait:false, categorie:a.categorie, frigo:true, dt:iso(maintenant) });
-      }
-    }
-  });
-  sauver();
-}
+// NOTE : syncFrigoCoursesAuto() était définie une seconde fois ici, à l'identique
+// (seuls les commentaires différaient). En JavaScript la dernière définition écrase
+// silencieusement la première : il n'y avait donc qu'une seule version réellement
+// active, et toute correction faite sur celle du haut aurait été annulée sans erreur
+// ni avertissement. Doublon supprimé — la définition de référence se trouve plus haut,
+// dans la section "SCAN CODE-BARRES & SYNC FRIGO ↔ COURSES".
 
 function afficherStatsFrigo(){
   const maintenant = ajd();
