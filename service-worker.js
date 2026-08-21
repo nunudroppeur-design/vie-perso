@@ -1,10 +1,9 @@
-const CACHE_NAME = 'vie-perso-v1';
+const CACHE_NAME = 'vie-perso-v2';
 const URLS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js',
-  'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
+  './',
+  './index.html',
+  './manifest.json',
+  'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js'
 ];
 
 // Installation du service worker
@@ -47,7 +46,7 @@ self.addEventListener('fetch', event => {
   }
 
   // Pour les fichiers locaux et le HTML : Network First
-  if(url.pathname.endsWith('.html') || url.pathname === '/') {
+  if(url.pathname.endsWith('.html') || url.pathname.endsWith('/')) {
     event.respondWith(
       fetch(request)
         .then(response => {

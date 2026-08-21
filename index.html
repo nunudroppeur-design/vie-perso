@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Vie Perso">
-<link rel="manifest" href="/manifest.json">
+<link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect fill='%231B34C4' width='180' height='180'/><text x='90' y='135' font-size='100' text-anchor='middle' font-family='system-ui'>💰</text></svg>">
 <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect fill='%231B34C4' width='180' height='180' rx='40'/><text x='90' y='135' font-size='100' text-anchor='middle' font-family='system-ui'>💰</text></svg>">
 <title>Vie Perso</title>
@@ -3900,7 +3900,7 @@ function exportPdfFrigo(){
 // ===== SERVICE WORKER (PWA) =====
 if('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/service-worker.js')
+    navigator.serviceWorker.register('service-worker.js')
       .then(reg => {
         console.log('✓ Service Worker enregistré');
         

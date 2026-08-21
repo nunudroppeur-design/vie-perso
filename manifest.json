@@ -2,8 +2,8 @@
   "name": "Vie Perso - Dashboard Budget",
   "short_name": "Vie Perso",
   "description": "Dashboard personnel : budget, dépenses, liste courses, santé, sport, voiture, frigo",
-  "start_url": "/index.html",
-  "scope": "/",
+  "start_url": "index.html",
+  "scope": "./",
   "display": "standalone",
   "theme_color": "#1B34C4",
   "background_color": "#F1F2ED",
@@ -41,7 +41,7 @@
       "name": "Ajouter dépense",
       "short_name": "Dépense",
       "description": "Ajouter rapidement une dépense",
-      "url": "/index.html?domaine=budget",
+      "url": "index.html?domaine=budget",
       "icons": [
         {
           "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'><rect fill='%23F5A300' width='96' height='96'/><text x='48' y='65' font-size='50' font-weight='bold' fill='white' text-anchor='middle' font-family='system-ui'>💸</text></svg>",
@@ -54,7 +54,7 @@
       "name": "Scanner ticket",
       "short_name": "Ticket",
       "description": "Scanner un ticket de caisse",
-      "url": "/index.html?domaine=budget&action=scan",
+      "url": "index.html?domaine=budget&action=scan",
       "icons": [
         {
           "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'><rect fill='%230F7F58' width='96' height='96'/><text x='48' y='65' font-size='50' font-weight='bold' fill='white' text-anchor='middle' font-family='system-us'>📷</text></svg>",
@@ -67,7 +67,7 @@
       "name": "Liste courses",
       "short_name": "Courses",
       "description": "Afficher la liste de courses",
-      "url": "/index.html?domaine=quotidien",
+      "url": "index.html?domaine=quotidien",
       "icons": [
         {
           "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'><rect fill='%236A7280' width='96' height='96'/><text x='48' y='65' font-size='50' font-weight='bold' fill='white' text-anchor='middle' font-family='system-ui'>🛒</text></svg>",
