@@ -13,7 +13,6 @@
 <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect fill='%231B34C4' width='180' height='180' rx='40'/><text x='90' y='135' font-size='100' text-anchor='middle' font-family='system-ui'>💰</text></svg>">
 <title>Vie Perso</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
 :root{
   --outremer:#1B34C4;
@@ -2297,6 +2296,10 @@ function ouvrirMenuScan() {
     + '<p style="font-size:11px;color:#999;margin-top:6px">Pas besoin de code-barres : recherche dans la base Open Food Facts par nom.</p>'
     + '</div>'
     + '<div style="border-top:1px solid #ddd;padding-top:12px;margin-top:4px">'
+    + '<button class="btn-second" style="width:100%;padding:14px" onclick="identifierProduitParPhoto()">📷 Identifier avec une photo</button>'
+    + '<p style="font-size:11px;color:#999;margin-top:6px">Prends en photo le produit (pas le code-barres) : l\'app essaie de deviner de quoi il s\'agit.</p>'
+    + '</div>'
+    + '<div style="border-top:1px solid #ddd;padding-top:12px;margin-top:4px">'
     + '<button class="btn-second" style="width:100%;padding:14px" onclick="ouvrirSaisieManuelleArticle()">✍️ Saisie manuelle (nom + macros)</button>'
     + '<p style="font-size:11px;color:#999;margin-top:6px">À utiliser si le produit n\'est identifiable par aucun code-barres.</p>'
     + '</div>'
@@ -2450,6 +2453,98 @@ const BASE_EAN_LOCAL = {
   '3596710406003': { nom:'Fromage blanc', marque:'Président', categorie:'Produits laitiers', kcal100:79, prot100:6, lip100:4.5, gluc100:4, sel100:0.1, image:'' }
 };
 
+// Clé Google Cloud Vision (restreinte au domaine nunudroppeur-design.github.io + à l'API Vision uniquement)
+const GOOGLE_VISION_API_KEY = 'AIzaSyDzL_EIEalwEqsW6xm7uRbaLElsUtCS2wU';
+
+// Traduction FR des libellés Vision les plus courants côté alimentation.
+// Non exhaustif : si un libellé n'y figure pas, on affiche le mot anglais tel quel.
+const TRADUCTION_LABELS_FR = {
+  'ham':'Jambon','pork':'Porc','bacon':'Bacon','sausage':'Saucisse','chicken':'Poulet',
+  'beef':'Bœuf','meat':'Viande','turkey':'Dinde','salami':'Salami','lunch meat':'Charcuterie',
+  'cheese':'Fromage','milk':'Lait','yogurt':'Yaourt','yoghurt':'Yaourt','butter':'Beurre',
+  'egg':'Œuf','bread':'Pain','baguette':'Baguette','fish':'Poisson','salmon':'Saumon',
+  'tuna':'Thon','shrimp':'Crevette','seafood':'Fruits de mer','apple':'Pomme','banana':'Banane',
+  'orange':'Orange','lemon':'Citron','strawberry':'Fraise','grape':'Raisin','tomato':'Tomate',
+  'potato':'Pomme de terre','carrot':'Carotte','onion':'Oignon','garlic':'Ail','lettuce':'Salade',
+  'broccoli':'Brocoli','bell pepper':'Poivron','pepper':'Poivron','cucumber':'Concombre',
+  'chocolate':'Chocolat','candy':'Bonbon','cookie':'Biscuit','cake':'Gâteau','pasta':'Pâtes',
+  'rice':'Riz','flour':'Farine','sugar':'Sucre','olive oil':'Huile d\'olive','oil':'Huile',
+  'honey':'Miel','jam':'Confiture','water':'Eau','juice':'Jus','wine':'Vin','beer':'Bière',
+  'cream':'Crème','nut':'Fruit à coque','almond':'Amande','walnut':'Noix','mushroom':'Champignon',
+  'spinach':'Épinard','zucchini':'Courgette','avocado':'Avocat','pear':'Poire','peach':'Pêche',
+  'melon':'Melon','watermelon':'Pastèque','pineapple':'Ananas','mango':'Mangue',
+  'yam':'Igname','cabbage':'Chou','leek':'Poireau','celery':'Céleri','fruit':'Fruit',
+  'vegetable':'Légume','food':'Aliment','dairy':'Produit laitier'
+};
+function traduireLabel(label){
+  return TRADUCTION_LABELS_FR[String(label).toLowerCase()] || label;
+}
+
+// ---- Identification d'un produit par photo (Google Cloud Vision - LABEL_DETECTION) ----
+function identifierProduitParPhoto(){
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.capture = 'environment';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => { await analyserPhotoProduit(ev.target.result); };
+    reader.readAsDataURL(file);
+  };
+  input.click();
+}
+
+async function analyserPhotoProduit(imageDataUrl){
+  toast('📸 Analyse de la photo...');
+  try{
+    const base64 = imageDataUrl.split(',')[1];
+    const res = await fetch('https://vision.googleapis.com/v1/images:annotate?key=' + GOOGLE_VISION_API_KEY, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        requests: [{ image: { content: base64 }, features: [{ type: 'LABEL_DETECTION', maxResults: 8 }] }]
+      })
+    });
+    const data = await res.json();
+    if(data.responses?.[0]?.error){
+      toast('❌ Erreur Vision API : ' + data.responses[0].error.message);
+      return;
+    }
+    const labels = (data.responses?.[0]?.labelAnnotations || []).filter(l => l.score >= 0.5).slice(0, 6);
+    if(!labels.length){ toast('❌ Rien de reconnaissable sur cette photo'); return; }
+    afficherSuggestionsPhoto(labels, imageDataUrl);
+  }catch(err){
+    console.error('Erreur Vision API (label detection):', err);
+    toast('❌ Erreur réseau lors de l\'analyse');
+  }
+}
+
+function afficherSuggestionsPhoto(labels, imageDataUrl){
+  let h = '<div class="sheet-hd"><h2>📸 Qu\'est-ce que c\'est ?</h2><button data-act="close">Fermer</button></div>'
+    + '<img src="' + imageDataUrl + '" style="width:100%;max-height:180px;object-fit:cover;border-radius:8px;margin-bottom:12px">'
+    + '<p class="hint" style="color:#666;font-size:12px;margin-bottom:10px">Touchez la suggestion la plus proche (on cherchera ensuite ses valeurs nutritionnelles), ou tapez le nom exact :</p>'
+    + '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">';
+  labels.forEach(l => {
+    const nomFr = traduireLabel(l.description);
+    h += '<button class="btn-second" style="padding:8px 12px;font-size:13px" onclick="rechercherProduitDepuisSuggestion(\'' + esc(nomFr).replace(/'/g,"\\'") + '\')">'
+      + esc(nomFr) + ' <span style="opacity:.6">' + Math.round(l.score*100) + '%</span></button>';
+  });
+  h += '</div>'
+    + '<div style="display:flex;gap:8px">'
+    + '<input type="text" id="rechNomPhoto" placeholder="Ou tapez le nom exact" style="flex:1;padding:10px;border:1px solid #ccc;border-radius:4px">'
+    + '<button class="btn-main" style="padding:10px 16px" onclick="rechercherProduitDepuisSuggestion(document.getElementById(\'rechNomPhoto\').value)">🔍</button>'
+    + '</div>';
+  SHEET.innerHTML = h;
+  ouvrirSheet();
+}
+
+function rechercherProduitDepuisSuggestion(nom){
+  if(!nom || !nom.trim()) return;
+  rechercherProduitParNom(nom.trim());
+}
+
 async function chercherProduitOFF(code) {
   // ===== 1. VÉRIFIER BASE LOCALE D'ABORD =====
   if(BASE_EAN_LOCAL[code]) {
@@ -2512,9 +2607,9 @@ function mapperProduitOFFDepuisJSON(p, code){
 // ---- Recherche par NOM de produit (texte libre, sans code-barres) ----
 let resultatsRechercheNom = [];
 
-async function rechercherProduitParNom(){
+async function rechercherProduitParNom(queryDirecte){
   const champ = document.getElementById('rechNom');
-  const q = champ ? champ.value.trim() : '';
+  const q = (queryDirecte || (champ ? champ.value.trim() : '')).trim();
   if(!q){ toast("Entrez un nom de produit"); return; }
   toast("🔍 Recherche « " + q + " »...");
   try{
@@ -2526,7 +2621,13 @@ async function rechercherProduitParNom(){
     const produits = (data.products || [])
       .filter(p => p.product_name || p.product_name_fr)
       .map(p => mapperProduitOFFDepuisJSON(p, p.code));
-    if(!produits.length){ toast("❌ Aucun résultat pour « " + q + " »"); return; }
+    if(!produits.length){
+      SHEET.innerHTML = '<div class="sheet-hd"><h2>🔍 Aucun résultat</h2><button data-act="close">Fermer</button></div>'
+        + '<p class="hint" style="color:#666;font-size:13px;margin-bottom:14px">Rien trouvé pour « ' + esc(q) + ' » dans Open Food Facts.</p>'
+        + '<button class="btn-main" style="width:100%" onclick="ouvrirSaisieManuelleArticle(\'' + esc(q).replace(/'/g,"\\'") + '\')">✍️ Ajouter quand même avec ce nom</button>';
+      ouvrirSheet();
+      return;
+    }
     resultatsRechercheNom = produits;
     afficherResultatsRechercheNom(q);
   }catch(err){
@@ -2574,10 +2675,10 @@ function categorieDepuisOFF(p) {
 
 // ---- Affichage et validation ----
 // ===== SAISIE MANUELLE ISOLÉE (écran distinct, sans passage par recherche EAN) =====
-function ouvrirSaisieManuelleArticle() {
+function ouvrirSaisieManuelleArticle(nomPrefill) {
   SHEET.innerHTML = '<div class="sheet-hd"><h2>✍️ Saisie manuelle</h2><button data-act="close">Fermer</button></div>'
     + '<p class="hint" style="color:#666;font-size:12px;margin-bottom:14px">Renseignez au moins le nom et les calories. Le sel est optionnel.</p>'
-    + '<div class="field"><label>Nom du produit *</label><input id="man_nom" placeholder="Ex. Comté AOP"></div>'
+    + '<div class="field"><label>Nom du produit *</label><input id="man_nom" placeholder="Ex. Comté AOP" value="' + esc(nomPrefill||'') + '"></div>'
     + '<div class="field"><label>Marque</label><input id="man_marque" placeholder="Ex. Fromagerie du village"></div>'
     + '<div class="field"><label>Catégorie</label><input id="man_categorie" placeholder="Ex. Produits laitiers"></div>'
     + '<div class="grid2">'
@@ -2932,24 +3033,28 @@ async function traiterTicketOCR(imageData){
     progressBar.style.width = progress + '%';
   }, 200);
   
-  let worker = null;
   try {
-    // Étape 1 : créer le worker Tesseract en français
-    worker = await Tesseract.createWorker('fra', 1, {
-      logger: (progress) => {
-        if(progress.status === 'recognizing text'){
-          const pct = Math.round((progress.progress||0) * 100);
-          progressBar.style.width = Math.max(pct, 85) + '%';
-        }
-      }
+    const base64 = imageData.split(',')[1];
+    const res = await fetch('https://vision.googleapis.com/v1/images:annotate?key=' + GOOGLE_VISION_API_KEY, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        requests: [{
+          image: { content: base64 },
+          features: [{ type: 'DOCUMENT_TEXT_DETECTION' }]
+        }]
+      })
     });
-    // PSM 4 = "une seule colonne de texte de tailles variables", adapté aux tickets de caisse.
-    // Le mode par défaut de Tesseract (PSM 3, page complète) segmente mal les tickets et
-    // produit souvent du texte illisible — c'est documenté comme une cause fréquente d'échec.
-    await worker.setParameters({ tessedit_pageseg_mode: '4' });
-
-    const { data: { text } } = await worker.recognize(imageData);
-    console.log('[OCR] Texte brut reconnu par Tesseract :', text); // diagnostic si le parsing échoue encore
+    progressBar.style.width = '85%';
+    const data = await res.json();
+    if(data.responses?.[0]?.error){
+      throw new Error(data.responses[0].error.message || 'Erreur Vision API');
+    }
+    const text = data.responses?.[0]?.fullTextAnnotation?.text || '';
+    console.log('[OCR] Texte brut reconnu (Vision API) :', text); // diagnostic si le parsing échoue encore
+    if(!text.trim()){
+      throw new Error('Aucun texte détecté sur la photo');
+    }
 
     progressBar.style.width = '90%';
     
@@ -2971,9 +3076,8 @@ async function traiterTicketOCR(imageData){
     console.error('Erreur OCR:', err);
     clearInterval(progressInterval);
     progressDiv.remove();
-    toast('❌ Erreur lors de la lecture du ticket');
+    toast('❌ Erreur lors de la lecture du ticket : ' + (err.message || ''));
   } finally {
-    if(worker) { try { await worker.terminate(); } catch(e){} }
     ocrEnCours = false;
   }
 }
