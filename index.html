@@ -3090,15 +3090,24 @@ function extraireArticlesTicket(texte){
 
   const sansAccents = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-  // Mots/en-têtes à ignorer (comparés sans accents). Couvre les tickets français ET
-  // des formats de caisse plus génériques (ex: tickets tunisiens en dinars).
-  const ignorer = /^(TOTAL|MONTANT|TVA|DONT|HT\b|TTC|TICKET|CAISSE|CAISSIER|CLIENT|DATE|HEURE|NUMERO|MERCI|BIENVENUE|SOUS.?TOTAL|REMISE|DISCOUNT|RECU|FACTURE|ANNULE|CANCELLED|ENCAISSEMENT|REGLEMENT|PAIEMENT|TRANSACTION|SOLDE|PRIX|DESIGNATION|NOM (STE|PRODUITS?)|QTE\b|LOGO|MODE|DEJA|PAYE|ESPECE|CARTE|CHEQUE|CHANGE|BONNE|NUIT|JOUR|A BIENTOT|VOUS AVEZ ETE SERVI)/i;
+  // Mots/en-têtes à ignorer (comparés sans accents, et après retrait d'une puce/astérisque
+  // éventuelle en tête de ligne). Couvre les tickets français ET des formats plus génériques.
+  const ignorer = /^(TOTAL|MONTANT|TVA|DONT|HT\b|TTC|EURO\b|TICKET|CAISSE|CAISSIER|CLIENT|HOTE|DATE|HEURE|NUMERO|NOMBRE|MERCI|BIENVENUE|SOUS.?TOTAL|REMISE|DISCOUNT|RECU|FACTURE|ANNULE|CANCELLED|ENCAISSEMENT|REGLEMENT|PAIEMENT|TRANSACTION|SOLDE|PRIX|DESIGNATION|NOM (STE|PRODUITS?)|QTE\b|LOGO|MODE|DEJA|PAYE|ESPECE|CARTE|CHEQUE|CHANGE|BONNE|NUIT|JOUR|A BIENTOT|VOUS AVEZ ETE SERVI|LUNDI|MARDI|MERCREDI|JEUDI|VENDREDI|SAMEDI|DIMANCHE)/i;
   const lignesSymboles = /^[-=*\s_\.]+$/;
-  // Lignes de date/heure ou d'URL (réseaux sociaux, site web) : jamais un article.
+  const enleverPuce = l => l.replace(/^[*•·▪]+\s*/, '');
+
+  // Lignes jamais un article, détectées où qu'apparaisse le motif dans la ligne (pas juste en tête) :
+  // date/heure, adresse (code postal + ville, téléphone), détail "prix au kg", mentions légales
+  // (SIRET, certification caisse NF525) qui contiennent souvent un nombre à décimales trompeur.
   const ligneNonPertinente = ligne =>
-    /^\d{1,2}[\/.]\d{1,2}[\/.]\d{2,4}/.test(ligne) ||
-    /^\d{1,2}\s*[:h]\s*\d{2}/.test(ligne) ||
-    /\.(com|fr|tn|net|org)\b/i.test(ligne);
+    /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(ligne) ||             // date jj/mm/aaaa
+    /\d{1,2}\s*:\s*\d{2}(\s*:\s*\d{2})?/.test(ligne) ||     // heure hh:mm(:ss)
+    /\.(com|fr|tn|net|org)\b/i.test(ligne) ||               // adresse web / réseau social
+    /\bkg\s*x\s*\d/i.test(ligne) || /eur\s*\/\s*kg/i.test(ligne) || // détail "0.170 kg x 32.10 Eur/kg"
+    /\bSIRET\b|\bSIREN\b|\bNAF\b|\bAPE\b/i.test(ligne) ||   // identifiants légaux d'entreprise
+    /NF-?525\b|\bMAGIC\b/i.test(ligne) ||                   // certification logiciel de caisse
+    /^\d{9,10}$/.test(ligne) ||                             // numéro de téléphone seul
+    /^\d{5}\s+[A-ZÀ-Ÿ]/.test(ligne);                        // code postal + ville
 
   // Nombre "monétaire" : 2 OU 3 décimales, pour couvrir aussi bien les tickets en euros
   // (2 décimales) que les tickets en dinars/millimes (3 décimales, ex: Tunisie).
@@ -3116,9 +3125,8 @@ function extraireArticlesTicket(texte){
     .replace(/^\d+\s*[xX×*]\s*/i, '')
     .replace(/^[\(\[].*?[\)\]]\s*/i, '')
     .replace(/^(?=[A-Z0-9]*\d)[A-Z0-9]{6,}\s*/, '')
-    .replace(/^\*+\s*/i, '')
-    .replace(/\*+$/i, '')
-    .replace(/[*#@!]/g, '')
+    .replace(/^[\*|•·▪\-–—]+\s*/, '')
+    .replace(/[*#@!|]/g, '')
     .trim();
 
   const ajouterArticle = (nomBrut, montant, qte) => {
@@ -3135,9 +3143,9 @@ function extraireArticlesTicket(texte){
     return true;
   };
 
-  const utiles = lignesToutes.filter(l =>
-    !ignorer.test(sansAccents(l)) && !lignesSymboles.test(l) && !ligneNonPertinente(l) && l.length >= 2
-  );
+  const utiles = lignesToutes
+    .filter(l => !ligneNonPertinente(l) && !lignesSymboles.test(l) && l.length >= 2)
+    .filter(l => !ignorer.test(sansAccents(enleverPuce(l))));
   const dejaTraitee = new Array(utiles.length).fill(false);
 
   // PASSE A : lignes "classiques" où le nom ET le prix sont sur la MÊME ligne
@@ -3165,9 +3173,10 @@ function extraireArticlesTicket(texte){
     dejaTraitee[idx] = ok;
   });
 
-  // PASSE B : nom sur une ou plusieurs lignes de texte pur, suivi de ligne(s) purement
-  // numériques (quantité / prix unitaire / total séparés) — cas de nombreux tickets où la
-  // mise en page originale est en colonnes, mais que l'OCR restitue ligne par ligne.
+  // PASSE B : nom sur une ou deux lignes de texte pur (une seule ligne de continuation
+  // autorisée, pour gérer un nom coupé en 2 par l'OCR type "CANNELLE"/"ORANGE", sans pour
+  // autant fusionner tout un bloc d'en-tête de ticket), suivi de ligne(s) purement numériques
+  // (quantité / prix unitaire / total séparés).
   let i = 0;
   while(i < utiles.length){
     if(dejaTraitee[i]){ i++; continue; }
@@ -3175,9 +3184,11 @@ function extraireArticlesTicket(texte){
     if(extraireNombres(ligne).length === 0 && !estPurementNumerique(ligne)){
       let nomAccum = ligne;
       let j = i + 1;
-      while(j < utiles.length && !dejaTraitee[j] && extraireNombres(utiles[j]).length === 0 && !estPurementNumerique(utiles[j])){
+      let continuations = 0;
+      while(j < utiles.length && !dejaTraitee[j] && continuations < 1 &&
+            extraireNombres(utiles[j]).length === 0 && !estPurementNumerique(utiles[j])){
         nomAccum += ' ' + utiles[j];
-        j++;
+        j++; continuations++;
       }
       const nombresBloc = [];
       while(j < utiles.length && !dejaTraitee[j] && estPurementNumerique(utiles[j]) && nombresBloc.length < 4){
