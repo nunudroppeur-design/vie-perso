@@ -3084,120 +3084,120 @@ async function traiterTicketOCR(imageData){
 
 function extraireArticlesTicket(texte){
   const articles = [];
-  
-  // Nettoyage initial : normaliser les caractères OCR mal reconnus
-  let texteNettoy = texte
-    .replace(/[\u00A0]/g, ' ');  // Espaces non-cassants → espaces normaux
-  
-  const lignes = texteNettoy.split('\n').map(l => l.trim()).filter(l => l);
-  
-  // Enlève les accents pour comparer "Chèque" à "CHEQUE" sans avoir à lister chaque variante.
+
+  let texteNettoy = texte.replace(/[\u00A0]/g, ' ');
+  const lignesToutes = texteNettoy.split('\n').map(l => l.trim()).filter(l => l);
+
   const sansAccents = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-  // STRATÉGIE 0 : format tableau "Nom  Quantité  Prix" (3 colonnes, ex: "Article 1  1  11,00€")
-  const regexNomQtePrix = /^(.+?)\s+(\d{1,3})\s+(\d+[.,]\d{2})\s*€?\s*$/;
-
-  // STRATÉGIE 1 : Montants à la fin (format normal : "Produit 5,99€")
-  const regexMontantFin = /(\d+[.,]\d{2})\s*€?\s*$/i;
-  
-  // STRATÉGIE 2 : Montants au milieu (format : "5,99€ Produit")
-  const regexMontantDebut = /^(\d+[.,]\d{2})\s*€?\s*/i;
-  
-  // STRATÉGIE 3 : Montants partout (fallback)
-  const regexMontantPartout = /(\d+[.,]\d{2})/;
-  
-  // Mots à ignorer AUGMENTÉS (comparés sans accents, cf. sansAccents ci-dessus)
-  const ignorer = /^(TOTAL|MONTANT|TVA|DONT|HT\b|TTC|TICKET|CAISSE|DATE|HEURE|NUMERO|MERCI|BIENVENUE|SOUS.?TOTAL|REMISE|DISCOUNT|RECU|FACTURE|ANNULE|CANCELLED|ENCAISSEMENT|REGLEMENT|PAIEMENT|TRANSACTION|SOLDE|PRIX|DESIGNATION|MODE|DEJA|PAYE|ESPECE|CARTE|CHEQUE|CHANGE|MERCI|BONNE|NUIT|JOUR|A BIENTOT|VOUS AVEZ ETE SERVI)/i;
+  // Mots/en-têtes à ignorer (comparés sans accents). Couvre les tickets français ET
+  // des formats de caisse plus génériques (ex: tickets tunisiens en dinars).
+  const ignorer = /^(TOTAL|MONTANT|TVA|DONT|HT\b|TTC|TICKET|CAISSE|CAISSIER|CLIENT|DATE|HEURE|NUMERO|MERCI|BIENVENUE|SOUS.?TOTAL|REMISE|DISCOUNT|RECU|FACTURE|ANNULE|CANCELLED|ENCAISSEMENT|REGLEMENT|PAIEMENT|TRANSACTION|SOLDE|PRIX|DESIGNATION|NOM (STE|PRODUITS?)|QTE\b|LOGO|MODE|DEJA|PAYE|ESPECE|CARTE|CHEQUE|CHANGE|BONNE|NUIT|JOUR|A BIENTOT|VOUS AVEZ ETE SERVI)/i;
   const lignesSymboles = /^[-=*\s_\.]+$/;
-  
-  let qteDetectee = 1;
-  lignes.forEach(ligne => {
-    const ligneNorm = sansAccents(ligne);
-    if(ignorer.test(ligneNorm)) return;
-    if(lignesSymboles.test(ligne)) return;
-    if(ligne.length < 3) return;
-    
-    let montant = null;
-    let nom = null;
-    let match = null;
-    qteDetectee = 1;
+  // Lignes de date/heure ou d'URL (réseaux sociaux, site web) : jamais un article.
+  const ligneNonPertinente = ligne =>
+    /^\d{1,2}[\/.]\d{1,2}[\/.]\d{2,4}/.test(ligne) ||
+    /^\d{1,2}\s*[:h]\s*\d{2}/.test(ligne) ||
+    /\.(com|fr|tn|net|org)\b/i.test(ligne);
 
-    // STRATÉGIE 0 : "Nom  Qté  Prix" sur 3 colonnes (PRIORITÉ ABSOLUE)
-    match = ligne.match(regexNomQtePrix);
-    if(match && !/[.,]/.test(match[2])){
-      nom = match[1].trim();
-      qteDetectee = parseInt(match[2], 10) || 1;
-      montant = parseFloat(match[3].replace(',', '.'));
+  // Nombre "monétaire" : 2 OU 3 décimales, pour couvrir aussi bien les tickets en euros
+  // (2 décimales) que les tickets en dinars/millimes (3 décimales, ex: Tunisie).
+  const reNombre = /\d+[.,]\d{2,3}/;
+  const reNombreG = () => new RegExp(reNombre.source, 'g');
+  const extraireNombres = ligne => {
+    const m = ligne.match(reNombreG());
+    return m ? m.map(s => parseFloat(s.replace(',', '.'))) : [];
+  };
+  // "Purement numérique" = aucune lettre dans la ligne (juste un ou des nombres, espaces, symboles).
+  const estPurementNumerique = ligne =>
+    !/[a-zA-ZÀ-ÿ\u00C0-\u017F]/.test(ligne) && extraireNombres(ligne).length > 0;
+
+  const nettoyerNom = nom => nom
+    .replace(/^\d+\s*[xX×*]\s*/i, '')
+    .replace(/^[\(\[].*?[\)\]]\s*/i, '')
+    .replace(/^(?=[A-Z0-9]*\d)[A-Z0-9]{6,}\s*/, '')
+    .replace(/^\*+\s*/i, '')
+    .replace(/\*+$/i, '')
+    .replace(/[*#@!]/g, '')
+    .trim();
+
+  const ajouterArticle = (nomBrut, montant, qte) => {
+    const nom = nettoyerNom(nomBrut);
+    if(!(nom && montant > 0 && montant < 5000 && nom.length > 1)) return false;
+    if(!/[a-zA-ZÀ-ÿ\u00C0-\u017F]/.test(nom)) return false;
+    if(ignorer.test(sansAccents(nom))) return false; // ex: nom réduit à "TTC" après retrait du nombre
+    const existe = articles.some(a =>
+      a.nom.toLowerCase() === nom.toLowerCase() ||
+      (a.nom.substring(0,12).toLowerCase() === nom.substring(0,12).toLowerCase() && Math.abs(a.montant - montant) < 0.3)
+    );
+    if(existe) return false;
+    articles.push({ nom: nom.substring(0,100), montant, qte: qte||1, id: Math.random().toString(36).substr(2,9), source:'ocr' });
+    return true;
+  };
+
+  const utiles = lignesToutes.filter(l =>
+    !ignorer.test(sansAccents(l)) && !lignesSymboles.test(l) && !ligneNonPertinente(l) && l.length >= 2
+  );
+  const dejaTraitee = new Array(utiles.length).fill(false);
+
+  // PASSE A : lignes "classiques" où le nom ET le prix sont sur la MÊME ligne
+  // (ex: "Produit 5,99€", ou "Article 1  1  11,00€" en 3 colonnes sur une seule ligne).
+  utiles.forEach((ligne, idx) => {
+    if(estPurementNumerique(ligne)) return; // laissé à la passe B
+    const nb = extraireNombres(ligne);
+    if(nb.length === 0) return; // ligne de texte pur (nom potentiel) : laissée à la passe B
+
+    let ok = false, m;
+    m = ligne.match(/^(.+?)\s+(\d{1,3})\s+(\d+[.,]\d{2,3})\s*€?\s*$/);
+    if(m && !/[.,]/.test(m[2])) ok = ajouterArticle(m[1], parseFloat(m[3].replace(',', '.')), parseInt(m[2],10)||1);
+
+    if(!ok){
+      m = ligne.match(new RegExp('(' + reNombre.source + ')\\s*€?\\s*$'));
+      if(m) ok = ajouterArticle(ligne.replace(m[0], ''), parseFloat(m[1].replace(',', '.')), 1);
     }
-    
-    // STRATÉGIE 1 : Montant à la fin (si la stratégie 0 n'a rien donné)
-    if(!montant){
-      match = ligne.match(regexMontantFin);
-      if(match){
-        montant = parseFloat(match[1].replace(',', '.'));
-        nom = ligne.replace(regexMontantFin, '').trim();
-      }
+    if(!ok){
+      m = ligne.match(new RegExp('^(' + reNombre.source + ')\\s*€?\\s*'));
+      if(m) ok = ajouterArticle(ligne.replace(m[0], ''), parseFloat(m[1].replace(',', '.')), 1);
     }
-    
-    // STRATÉGIE 2 : Montant au début (FALLBACK)
-    if(!montant){
-      match = ligne.match(regexMontantDebut);
-      if(match){
-        montant = parseFloat(match[1].replace(',', '.'));
-        nom = ligne.replace(regexMontantDebut, '').trim();
-      }
+    if(!ok && nb.length){
+      ok = ajouterArticle(ligne.replace(reNombreG(), ''), nb[0], 1);
     }
-    
-    // STRATÉGIE 3 : Montant partout (DERNIER RECOURS)
-    if(!montant){
-      match = ligne.match(regexMontantPartout);
-      if(match){
-        montant = parseFloat(match[1].replace(',', '.'));
-        nom = ligne.replace(match[1], '').trim();
-      }
-    }
-    
-    // Si on a un montant, nettoyer le nom
-    if(montant && nom){
-      // Nettoyer le nom AGRESSIVEMENT
-      nom = nom
-        .replace(/^\d+\s*[xX×*]\s*/i, '')  // "2x Lait" → "Lait"
-        .replace(/^[\(\[].*?[\)\]]\s*/i, '')  // "(CODE123)" → ""
-        .replace(/^[A-Z0-9]{6,}\s*/, '')  // Codes barres (majuscules/chiffres uniquement)
-        .replace(/^\*+\s*/i, '')  // Astérisques
-        .replace(/\*+$/i, '')  // Astérisques fin
-        .replace(/[*#@!]/g, '')  // Caractères spéciaux OCR
-        .trim();
-      
-      // Valider l'article
-      if(nom && montant > 0 && montant < 2000 && nom.length > 1){
-        // Le nom DOIT avoir au moins UNE LETTRE
-        if(/[a-zA-ZÀ-ÿ\u00C0-\u017F]/.test(nom)){
-          // Vérifier qu'on n'a pas déjà cet article
-          const existe = articles.some(a => 
-            a.nom.toLowerCase() === nom.toLowerCase() ||
-            (a.nom.substring(0,12).toLowerCase() === nom.substring(0,12).toLowerCase() && 
-             Math.abs(a.montant - montant) < 0.3)  // Tolérance 30 centimes
-          );
-          
-          if(!existe){
-            articles.push({
-              nom: nom.substring(0, 100),  // 100 caractères
-              montant: montant,
-              qte: qteDetectee,
-              id: Math.random().toString(36).substr(2,9),
-              source: 'ocr'
-            });
-          }
-        }
-      }
-    }
+    dejaTraitee[idx] = ok;
   });
-  
-  // Trier par montant décroissant
+
+  // PASSE B : nom sur une ou plusieurs lignes de texte pur, suivi de ligne(s) purement
+  // numériques (quantité / prix unitaire / total séparés) — cas de nombreux tickets où la
+  // mise en page originale est en colonnes, mais que l'OCR restitue ligne par ligne.
+  let i = 0;
+  while(i < utiles.length){
+    if(dejaTraitee[i]){ i++; continue; }
+    const ligne = utiles[i];
+    if(extraireNombres(ligne).length === 0 && !estPurementNumerique(ligne)){
+      let nomAccum = ligne;
+      let j = i + 1;
+      while(j < utiles.length && !dejaTraitee[j] && extraireNombres(utiles[j]).length === 0 && !estPurementNumerique(utiles[j])){
+        nomAccum += ' ' + utiles[j];
+        j++;
+      }
+      const nombresBloc = [];
+      while(j < utiles.length && !dejaTraitee[j] && estPurementNumerique(utiles[j]) && nombresBloc.length < 4){
+        nombresBloc.push(...extraireNombres(utiles[j]));
+        dejaTraitee[j] = true;
+        j++;
+      }
+      if(nombresBloc.length){
+        const montant = nombresBloc[nombresBloc.length - 1]; // le dernier nombre du bloc = le total de la ligne
+        let qte = 1;
+        if(nombresBloc.length >= 2 && Number.isInteger(nombresBloc[0]) && nombresBloc[0] < 100 && nombresBloc[0] > 0) qte = nombresBloc[0];
+        ajouterArticle(nomAccum, montant, qte);
+      }
+      i = j;
+    } else {
+      i++;
+    }
+  }
+
   articles.sort((a, b) => b.montant - a.montant);
-  
-  // Limiter à 100 articles (très généreux)
   return articles.slice(0, 100);
 }
 
