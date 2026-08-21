@@ -12,7 +12,6 @@
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect fill='%231B34C4' width='180' height='180'/><text x='90' y='135' font-size='100' text-anchor='middle' font-family='system-ui'>💰</text></svg>">
 <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect fill='%231B34C4' width='180' height='180' rx='40'/><text x='90' y='135' font-size='100' text-anchor='middle' font-family='system-ui'>💰</text></svg>">
 <title>Vie Perso</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
 <style>
 :root{
   --outremer:#1B34C4;
@@ -329,85 +328,26 @@ body.shop .card-acts{display:none}
 
 <!-- Modal gestion clé API -->
 
-<!-- QuaggaJS : décodage code-barres -->
-<script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js">
-// ===== OUTILS FRIGO v5 - SYNC + STATS + EXPORT =====
-
-function syncFrigoCoursesAuto() {
-  if(!D.frigoSync.autoSuggest) return;
-  const maintenant = ajd();
-  const dlcAlerte = new Date(maintenant);
-  dlcAlerte.setDate(dlcAlerte.getDate() + 3);
-  
-  D.frigo.forEach(a => {
-    if(a.dlc && new Date(a.dlc) < dlcAlerte && new Date(a.dlc) > maintenant) {
-      const existing = D.courses.find(c => c.nom.toLowerCase() === a.nom.toLowerCase() && !c.fait);
-      if(!existing) {
-        D.courses.push({ id:uid(), nom:a.nom+' (stock bas)', fait:false, categorie:a.categorie, frigo:true, dt:iso(maintenant) });
-      }
-    }
-  });
-  sauver();
-}
-
-function afficherStatsFrigo(){
-  const maintenant = ajd();
-  let gaspille = 0;
-  const expires = [];
-  
-  D.frigo.forEach(a => {
-    if(a.dlc && new Date(a.dlc) < maintenant) {
-      gaspille++;
-      expires.push(a);
-    }
-  });
-  
-  let h = '<div class="sheet-hd"><h2>Stats gaspillage</h2><button data-act="close">Fermer</button></div>';
-  h += '<div class="kpis"><div class="kpi"><div class="v">'+gaspille+'</div><div class="l">articles expires</div></div></div>';
-  
-  if(expires.length > 0) {
-    h += '<div class="sec"><div class="sec-hd"><span>Articles expires</span></div>';
-    expires.forEach(a => {
-      h += '<div class="card"><div class="card-body"><div class="card-title">'+esc(a.nom)+'</div>';
-      h += '<div class="card-meta"><span>'+a.categorie+'</span><span class="late">'+a.dlc+'</span></div></div></div>';
-    });
-    h += '</div>';
-  } else {
-    h += '<p class="note" style="margin-top:20px">Aucun article expire. Bien joue!</p>';
-  }
-  
-  SHEET.innerHTML = h;
-  ouvrirSheet();
-}
-
-function togglSyncFrigoCoursesAuto(){
-  D.frigoSync.autoSuggest = !D.frigoSync.autoSuggest;
-  sauver();
-  rendre();
-  toast('Sync Frigo-Courses: '+(D.frigoSync.autoSuggest?'ON':'OFF'));
-}
-
-function exportPdfFrigo(){
-  if(D.frigo.length === 0){
-    toast('Frigo vide');
-    return;
-  }
-  
-  let txt = 'INVENTAIRE FRIGO\n' + iso(ajd()) + '\n\n';
-  D.frigo.forEach(a => {
-    txt += '- ' + a.nom + ' (' + a.categorie + ') DLC: ' + a.dlc + '\n';
-  });
-  
-  const win = window.open('about:blank', '', 'height=400,width=600');
-  win.document.write('<pre>' + esc(txt) + '</pre>');
-  win.document.close();
-  win.print();
-}
-
-</script>
 
 <script>
 "use strict";
+/* ======================= CHARGEMENT PARESSEUX DES LIBS EXTERNES ======================= */
+// Charge un script externe une seule fois (même en cas d'appels multiples/concurrents) et retourne une promesse.
+const _scriptsCharges = {};
+function chargerScriptExterne(url){
+  if(_scriptsCharges[url]) return _scriptsCharges[url];
+  _scriptsCharges[url] = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = url;
+    s.onload = () => resolve();
+    s.onerror = () => { delete _scriptsCharges[url]; reject(new Error('Echec chargement ' + url)); };
+    document.head.appendChild(s);
+  });
+  return _scriptsCharges[url];
+}
+const URL_CHART_JS = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js';
+const URL_QUAGGA_JS = 'https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js';
+
 /* ======================= DONNEES UNIFIEES ======================= */
 const CLE = "viePerso.v4";
 const CLE_SAVES = "viePerso.saves";
@@ -2271,6 +2211,7 @@ function demanderPermNotif() {
 
 // Menu de scan : photo unique ou vidéo multi-produits
 function ouvrirMenuScan() {
+  chargerScriptExterne(URL_QUAGGA_JS).catch(()=>{}); // préchargement silencieux, non bloquant
   SHEET.innerHTML = '<div class="sheet-hd"><h2>📷 Scanner un code-barres</h2><button data-act="close">Fermer</button></div>'
     + '<p class="hint" style="color:#666;font-size:12px;margin-bottom:14px">Identification via la base Open Food Facts (gratuite, 2,8 M de produits).</p>'
     + '<div style="display:flex;flex-direction:column;gap:10px">'
@@ -2297,6 +2238,7 @@ function ouvrirMenuScan() {
     + '</div>'
     + '<div style="border-top:1px solid #ddd;padding-top:12px;margin-top:4px">'
     + '<button class="btn-second" style="width:100%;padding:14px" onclick="identifierProduitParPhoto()">📷 Identifier avec une photo</button>'
+    + '<button class="btn-second" style="width:100%;padding:8px;margin-top:6px;font-size:13px" onclick="ouvrirReglagesApiKey()">🔑 Configurer la clé API Vision</button>'
     + '<p style="font-size:11px;color:#999;margin-top:6px">Prends en photo le produit (pas le code-barres) : l\'app essaie de deviner de quoi il s\'agit.</p>'
     + '</div>'
     + '<div style="border-top:1px solid #ddd;padding-top:12px;margin-top:4px">'
@@ -2428,9 +2370,12 @@ function allerAInstant(video, temps) {
   });
 }
 
-function decoderImageCode(dataUrl) {
+async function decoderImageCode(dataUrl) {
+  if(typeof Quagga === 'undefined'){
+    try{ await chargerScriptExterne(URL_QUAGGA_JS); }
+    catch(err){ console.error(err); return null; }
+  }
   return new Promise((resolve) => {
-    if(typeof Quagga === 'undefined') { resolve(null); return; }
     Quagga.decodeSingle({
       decoder: { readers: ["ean_reader","ean_8_reader","code_128_reader","upc_reader"] },
       locate: true,
@@ -2454,7 +2399,35 @@ const BASE_EAN_LOCAL = {
 };
 
 // Clé Google Cloud Vision (restreinte au domaine nunudroppeur-design.github.io + à l'API Vision uniquement)
-const GOOGLE_VISION_API_KEY = 'AIzaSyDzL_EIEalwEqsW6xm7uRbaLElsUtCS2wU';
+/* ===== Clé API Google Vision : stockée en local uniquement, jamais dans le code source ===== */
+const CLE_VISION_API = 'viePerso.visionApiKey';
+function getVisionApiKey(){
+  return localStorage.getItem(CLE_VISION_API) || '';
+}
+function definirVisionApiKey(valeur){
+  const v = (valeur||'').trim();
+  if(!v){ localStorage.removeItem(CLE_VISION_API); return; }
+  localStorage.setItem(CLE_VISION_API, v);
+}
+function ouvrirReglagesApiKey(messageIntro){
+  const cleActuelle = getVisionApiKey();
+  let h = '<h3>🔑 Clé API Google Vision</h3>';
+  if(messageIntro) h += '<p class="note">'+esc(messageIntro)+'</p>';
+  h += '<p class="note">Nécessaire pour la lecture de tickets et l\'identification de produit par photo. Cette clé reste uniquement sur cet appareil : elle n\'est jamais écrite dans le code, seulement envoyée à Google lors d\'un scan.</p>';
+  h += '<div class="form-group"><label>Clé API Google Vision</label><input type="text" id="inputVisionApiKey" placeholder="AIzaSy..." value="'+esc(cleActuelle)+'"></div>';
+  h += '<div style="display:flex;gap:8px;margin-top:14px">';
+  h += '<button class="btn btn-primary" onclick="validerReglagesApiKey()">Enregistrer</button>';
+  if(cleActuelle) h += '<button class="btn btn-secondary" onclick="definirVisionApiKey(\'\');fermerFeuille();toast(\'Clé supprimée\')">Supprimer</button>';
+  h += '</div>';
+  SHEET.innerHTML = h;
+  ouvrirSheet();
+}
+function validerReglagesApiKey(){
+  const val = document.getElementById('inputVisionApiKey').value;
+  definirVisionApiKey(val);
+  fermerFeuille();
+  toast(val.trim() ? '✅ Clé API enregistrée sur cet appareil' : 'Clé API vidée');
+}
 
 // Traduction FR des libellés Vision les plus courants côté alimentation.
 // Non exhaustif : si un libellé n'y figure pas, on affiche le mot anglais tel quel.
@@ -2497,10 +2470,12 @@ function identifierProduitParPhoto(){
 }
 
 async function analyserPhotoProduit(imageDataUrl){
+  const cleApi = getVisionApiKey();
+  if(!cleApi){ ouvrirReglagesApiKey('Configure ta clé API pour identifier un produit par photo.'); return; }
   toast('📸 Analyse de la photo...');
   try{
     const base64 = imageDataUrl.split(',')[1];
-    const res = await fetch('https://vision.googleapis.com/v1/images:annotate?key=' + GOOGLE_VISION_API_KEY, {
+    const res = await fetch('https://vision.googleapis.com/v1/images:annotate?key=' + cleApi, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -3003,6 +2978,8 @@ async function scannerTicket(){
 }
 
 async function traiterTicketOCR(imageData){
+  const cleApi = getVisionApiKey();
+  if(!cleApi){ ouvrirReglagesApiKey('Configure ta clé API pour scanner un ticket.'); return; }
   ocrEnCours = true;
   
   // Créer une barre de progression
@@ -3035,7 +3012,7 @@ async function traiterTicketOCR(imageData){
   
   try {
     const base64 = imageData.split(',')[1];
-    const res = await fetch('https://vision.googleapis.com/v1/images:annotate?key=' + GOOGLE_VISION_API_KEY, {
+    const res = await fetch('https://vision.googleapis.com/v1/images:annotate?key=' + cleApi, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -3388,6 +3365,7 @@ function vueDomaineBudget(){
       <div style="display:flex;gap:8px;margin-top:14px">
         <button class="btn btn-primary" onclick="ajouterDepenseBudget()">Ajouter</button>
         <button class="btn btn-secondary" onclick="scannerTicket()" ${ocrEnCours ? 'disabled' : ''}>📷 Ticket</button>
+        <button class="btn btn-secondary btn-sm" onclick="ouvrirReglagesApiKey()" title="Clé API Google Vision">🔑</button>
         <button class="btn btn-secondary btn-sm" onclick="reinitForm()">Réinit</button>
       </div>
     </div>
@@ -3461,7 +3439,11 @@ function afficherKpisBudget(){
   document.getElementById('kpiSynthese').innerHTML = html;
 }
 
-function afficherGraphiquesBudget(){
+async function afficherGraphiquesBudget(){
+  if(typeof Chart === 'undefined'){
+    try{ await chargerScriptExterne(URL_CHART_JS); }
+    catch(err){ console.error(err); toast('❌ Impossible de charger les graphiques (réseau)'); return; }
+  }
   const parCat = obtenirDepensesParCategorieBudget(periodeBudget);
   const cats = Object.keys(parCat).filter(c => parCat[c] > 0);
   const vals = cats.map(c => parCat[c]);
