@@ -363,6 +363,7 @@ let D = {
   regles:[],                                        // cycles menstruels {id, debut, fin, flux, douleur, notes}
   trousseRegles:null,                               // trousse à emporter {items:[{id,label,coche}]}
   repas:[],
+  depenses:[],                                      // budget : dépenses enregistrées
   frigoSync: { autoSuggest: true },              // sync frigo ↔ courses
   stats: { gaspille: 0 },                           // stats gaspillage
   alertes: { expiration: true },                    // notifications
@@ -427,24 +428,42 @@ function migrerAncien(){
   }catch(e){}
 }
 
+/* Garantit qu'aucune collection attendue par l'application ne manque, quelle que soit
+   l'origine des données : première ouverture, sauvegarde d'une version antérieure, ou
+   fichier importé incomplet.
+
+   Sans cette normalisation, une clé absente ne se voyait pas au chargement mais faisait
+   planter la première écriture. C'était exactement le cas de `depenses` : absent de
+   l'objet initial, et reconstruit uniquement lorsqu'une sauvegarde existait déjà. À la
+   toute première ouverture — ou après un vidage du stockage du navigateur — valider un
+   ticket de caisse appelait donc D.depenses.push() sur une valeur indéfinie et échouait
+   sur un simple « Erreur lors du traitement ». */
+function normaliserDonnees(p){
+  const src = (p && typeof p === "object") ? p : {};
+  const d = { v:4 };
+  ["courses","rdv","evenements","taches","historique","sante","programme","voiture",
+   "frigo","recettes_favorites","regles","repas","depenses"]
+    .forEach(k => { d[k] = Array.isArray(src[k]) ? src[k] : []; });
+  d.trousseRegles       = src.trousseRegles || null;
+  d.objectifsNutrition  = src.objectifsNutrition || null;
+  d.frigoSync           = src.frigoSync || { autoSuggest: true };
+  d.stats               = src.stats || { gaspille: 0 };
+  d.alertes             = src.alertes || { expiration: true };
+  return d;
+}
+
 function charger(){
+  let brut = null;
   try{
     const b = localStorage.getItem(CLE);
-    if(b){
-      const p = JSON.parse(b);
-      D = { v:4, courses:p.courses||[], rdv:p.rdv||[], evenements:p.evenements||[], taches:p.taches||[],
-        historique:p.historique||[],
-        sante:p.sante||[], programme:p.programme||[], voiture:p.voiture||[],
-        frigo:p.frigo||[], recettes_favorites:p.recettes_favorites||[],
-        regles:p.regles||[], trousseRegles:p.trousseRegles||null,
-        repas:p.repas||[], objectifsNutrition:p.objectifsNutrition||null,
-        depenses:p.depenses||[],
-        frigoSync: p.frigoSync || { autoSuggest: true },
-        stats: p.stats || { gaspille: 0 },
-        alertes: p.alertes || { expiration: true } };
-    }
+    if(b) brut = JSON.parse(b);
   }catch(e){ console.warn("Données illisibles", e); }
+
+  // Normalisation systématique, y compris quand aucune sauvegarde n'existe encore.
+  D = normaliserDonnees(brut || D);
   migrerAncien();
+  D = normaliserDonnees(D); // migrerAncien() peut réinjecter un format ancien : on re-normalise.
+
   if(!D.trousseRegles || !Array.isArray(D.trousseRegles.items) || !D.trousseRegles.items.length){
     D.trousseRegles = trousseParDefaut();
   }
@@ -2124,6 +2143,10 @@ function isoDansJours(n){ const d = ajd(); d.setDate(d.getDate() + n); return is
 
 // Sync Frigo ↔ Courses : si article frigo proche DLC, suggérer achat
 function syncFrigoCoursesAuto() {
+  // Garde volontaire : cette fonction est appelée au rendu de l'onglet Frigo. Si frigoSync
+  // venait à manquer (données d'une version antérieure, sauvegarde partielle), l'onglet
+  // entier plantait. On répare la structure au lieu de laisser l'écran tomber.
+  if(!D.frigoSync || typeof D.frigoSync !== 'object') D.frigoSync = { autoSuggest: true };
   if(!D.frigoSync.autoSuggest) return;
   const maintenant = ajd();
   const dlcAlerte = new Date(maintenant);
@@ -2831,7 +2854,7 @@ function vueDomaineFrigo(){
   h += '<div class="sheet-acts">';
   h += '<button class="btn-second" data-act="afficherStatsFrigo">Stats</button>';
   h += '<button class="btn-second" data-act="exportPdfFrigo">Export PDF</button>';
-  h += '<button class="btn-second" data-act="togglSyncFrigoCoursesAuto">Sync '+(D.frigoSync.autoSuggest?'ON':'OFF')+'</button>';
+  h += '<button class="btn-second" data-act="togglSyncFrigoCoursesAuto">Sync '+((D.frigoSync && D.frigoSync.autoSuggest)?'ON':'OFF')+'</button>';
   h += '</div></div>';
 
   return h;
@@ -2996,85 +3019,281 @@ async function scannerTicket(){
   input.click();
 }
 
-async function traiterTicketOCR(imageData){
-  const cleApi = getVisionApiKey();
-  if(!cleApi){ ouvrirReglagesApiKey('Configure ta clé API pour scanner un ticket.'); return; }
-  ocrEnCours = true;
-  
-  // Créer une barre de progression
-  const progressDiv = document.createElement('div');
-  progressDiv.id = 'ocr-progress';
-  progressDiv.style.cssText = `
-    position:fixed;top:0;left:0;right:0;z-index:10000;
-    background:var(--outremer);color:white;
-    padding:12px;text-align:center;
-    box-shadow:0 2px 8px rgba(0,0,0,0.1);
-  `;
-  progressDiv.innerHTML = `
-    <div style="margin-bottom:8px;font-weight:700;font-size:14px">
-      📸 Analyse de la photo...
-    </div>
-    <div style="background:rgba(255,255,255,0.3);height:4px;border-radius:2px;overflow:hidden">
-      <div id="ocr-bar" style="background:white;height:100%;width:0;transition:width 0.3s ease"></div>
-    </div>
-  `;
-  document.body.appendChild(progressDiv);
-  
-  const progressBar = document.getElementById('ocr-bar');
-  let progress = 0;
-  
-  const progressInterval = setInterval(() => {
-    progress += Math.random() * 30;
-    if(progress > 85) progress = 85;
-    progressBar.style.width = progress + '%';
-  }, 200);
-  
-  try {
-    const base64 = imageData.split(',')[1];
-    const res = await fetch('https://vision.googleapis.com/v1/images:annotate?key=' + cleApi, {
+/* ===== Journal de diagnostic du scan ticket =====
+   Chaque étape est tracée. En cas d'échec, le journal est affiché à l'écran : le scan
+   ne peut plus échouer en silence, on sait toujours à quelle étape ça s'est arrêté. */
+let journalScanTicket = [];
+let derniereEtapeScan = 'aucune';
+function noterEtapeScan(etape, detail){
+  derniereEtapeScan = etape;
+  const ligne = (detail === undefined || detail === '') ? etape : etape + ' — ' + detail;
+  journalScanTicket.push(ligne);
+  console.log('[SCAN TICKET] ' + ligne);
+}
+
+/* Poids réel (en octets) des données derrière une dataURL base64. */
+function poidsBase64(dataUrl){
+  const b64 = String(dataUrl).split(',')[1] || '';
+  return Math.ceil(b64.length * 3 / 4);
+}
+function enKo(octets){ return Math.round(octets / 1024) + ' Ko'; }
+
+/* Redimensionne et recompresse la photo avant l'envoi.
+   L'API Vision impose une limite de 10 Mo sur l'objet JSON de la requête, et l'encodage
+   base64 gonfle l'image d'environ 33 % : une photo de smartphone de 8 Mo dépasse donc la
+   limite une fois encodée. Google recommande par ailleurs de conserver de la résolution
+   pour l'OCR de texte dense (un ticket), d'où une descente progressive plutôt qu'une
+   réduction brutale : on s'arrête au premier réglage qui tient dans le budget. */
+function redimensionnerImagePourOCR(dataUrl, budgetOctets){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onerror = () => reject(new Error("Photo illisible : format non supporté ou fichier corrompu"));
+    img.onload = () => {
+      try{
+        if(!img.width || !img.height){
+          reject(new Error('Photo aux dimensions nulles')); return;
+        }
+        const reglages = [
+          { cote: 2400, qualite: 0.85 },
+          { cote: 2000, qualite: 0.80 },
+          { cote: 1600, qualite: 0.72 }
+        ];
+        let dernier = null, dernierPoids = 0, dernieresDims = '';
+        for(const r of reglages){
+          const ratio = Math.min(1, r.cote / Math.max(img.width, img.height));
+          const l = Math.max(1, Math.round(img.width * ratio));
+          const h = Math.max(1, Math.round(img.height * ratio));
+          const canvas = document.createElement('canvas');
+          canvas.width = l; canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if(!ctx){ reject(new Error("Le navigateur refuse de traiter l'image (canvas indisponible)")); return; }
+          // Aplat blanc d'abord : sans lui, un PNG à fond transparent virerait au noir en JPEG.
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, l, h);
+          ctx.drawImage(img, 0, 0, l, h);
+          dernier = canvas.toDataURL('image/jpeg', r.qualite);
+          dernierPoids = poidsBase64(dernier);
+          dernieresDims = l + '×' + h + ' px';
+          if(dernierPoids <= budgetOctets){
+            resolve({ dataUrl: dernier, dims: dernieresDims, octets: dernierPoids, original: img.width + '×' + img.height + ' px' });
+            return;
+          }
+        }
+        // Même au réglage le plus économe la photo reste au-dessus du budget.
+        reject(new Error('Photo trop lourde même après compression (' + enKo(dernierPoids)
+          + '). Reprenez-la de moins loin, ou baissez la résolution de l\'appareil photo.'));
+      }catch(err){ reject(err); }
+    };
+    img.src = dataUrl;
+  });
+}
+
+/* Appel de l'API Vision, avec délai maximal et remontée d'erreur explicite.
+   L'ancienne version ne regardait que data.responses[0].error : une clé invalide, restreinte
+   au mauvais domaine, ou un quota dépassé renvoient une erreur à la RACINE de la réponse,
+   qui passait donc inaperçue et ressortait en trompe-l'œil comme "aucun texte détecté". */
+async function appelVisionAvecTimeout(cleApi, base64, timeoutMs){
+  const controleur = new AbortController();
+  const minuteur = setTimeout(() => controleur.abort(), timeoutMs);
+  try{
+    const res = await fetch('https://vision.googleapis.com/v1/images:annotate?key=' + encodeURIComponent(cleApi), {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: { 'Content-Type': 'application/json' },
+      signal: controleur.signal,
       body: JSON.stringify({
         requests: [{
           image: { content: base64 },
-          features: [{ type: 'DOCUMENT_TEXT_DETECTION' }]
+          features: [{ type: 'DOCUMENT_TEXT_DETECTION' }],
+          imageContext: { languageHints: ['fr'] }
         }]
       })
     });
-    progressBar.style.width = '85%';
-    const data = await res.json();
-    if(data.responses?.[0]?.error){
-      throw new Error(data.responses[0].error.message || 'Erreur Vision API');
+
+    const brut = await res.text();
+    let data;
+    try{ data = JSON.parse(brut); }
+    catch(e){
+      throw new Error('Réponse illisible de Google (HTTP ' + res.status + ') : ' + brut.slice(0, 160));
     }
-    const text = data.responses?.[0]?.fullTextAnnotation?.text || '';
-    console.log('[OCR] Texte brut reconnu (Vision API) :', text); // diagnostic si le parsing échoue encore
-    if(!text.trim()){
-      throw new Error('Aucun texte détecté sur la photo');
+    if(data && data.error){
+      throw new Error('Google a refusé la requête : ' + (data.error.message || ('HTTP ' + res.status)));
+    }
+    if(!res.ok){
+      throw new Error('Google a répondu HTTP ' + res.status);
+    }
+    if(data && data.responses && data.responses[0] && data.responses[0].error){
+      throw new Error("Google a refusé l'image : " + (data.responses[0].error.message || 'erreur inconnue'));
+    }
+    return data;
+  }catch(err){
+    if(err && err.name === 'AbortError'){
+      throw new Error('Aucune réponse de Google après ' + Math.round(timeoutMs / 1000)
+        + ' s. Réseau trop lent ou coupé : réessayez en Wi-Fi.');
+    }
+    // fetch() rejette avec un TypeError quand la requête n'est jamais partie
+    // (hors ligne, DNS, CORS, clé restreinte à un autre domaine…).
+    // On teste err.name plutôt qu'instanceof : instanceof échoue dès que l'erreur
+    // provient d'un autre contexte d'exécution (iframe, worker, outil de test).
+    if(err && err.name === 'TypeError'){
+      throw new Error("Impossible de joindre Google. Vérifiez la connexion, et que la clé API "
+        + "autorise bien le domaine du site.");
+    }
+    throw err;
+  }finally{
+    clearTimeout(minuteur);
+  }
+}
+
+async function traiterTicketOCR(imageData){
+  if(ocrEnCours){ toast('Un scan est déjà en cours, patientez…'); return; }
+
+  journalScanTicket = [];
+  derniereEtapeScan = 'démarrage';
+
+  const cleApi = getVisionApiKey();
+  if(!cleApi){ ouvrirReglagesApiKey('Configurez votre clé API Google Vision pour scanner un ticket.'); return; }
+
+  ocrEnCours = true;
+  let progressDiv = null, progressInterval = null;
+
+  // Tout le corps est protégé, y compris la création de la barre de progression :
+  // dans la version précédente, une erreur avant le try tuait la fonction en silence
+  // ET laissait ocrEnCours à true, ce qui désactivait définitivement le bouton Ticket.
+  try{
+    noterEtapeScan('Photo reçue', enKo(poidsBase64(imageData)));
+
+    progressDiv = document.createElement('div');
+    progressDiv.id = 'ocr-progress';
+    progressDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;'
+      + 'background:var(--outremer,#1B34C4);color:white;padding:12px;text-align:center;'
+      + 'box-shadow:0 2px 8px rgba(0,0,0,0.1);font-family:inherit';
+    progressDiv.innerHTML = '<div id="ocr-label" style="margin-bottom:8px;font-weight:700;font-size:14px">'
+      + '📸 Préparation de la photo…</div>'
+      + '<div style="background:rgba(255,255,255,0.3);height:4px;border-radius:2px;overflow:hidden">'
+      + '<div id="ocr-bar" style="background:white;height:100%;width:0;transition:width .3s ease"></div></div>';
+    document.body.appendChild(progressDiv);
+
+    const barre = progressDiv.querySelector('#ocr-bar');
+    const label = progressDiv.querySelector('#ocr-label');
+    const avancer = (pct, texte) => {
+      if(barre) barre.style.width = pct + '%';
+      if(label && texte) label.textContent = texte;
+    };
+
+    // Petite animation d'attente pendant l'appel réseau, plafonnée pour ne pas
+    // laisser croire que c'est terminé.
+    let pctAnim = 20;
+    progressInterval = setInterval(() => {
+      pctAnim = Math.min(80, pctAnim + 4);
+      if(barre) barre.style.width = pctAnim + '%';
+    }, 400);
+
+    // --- Étape 1 : normaliser la photo pour tenir sous la limite de 10 Mo de Vision ---
+    avancer(10, '📸 Optimisation de la photo…');
+    const budget = 6 * 1024 * 1024; // marge nette sous les 10 Mo de la limite JSON
+    const opt = await redimensionnerImagePourOCR(imageData, budget);
+    noterEtapeScan('Photo optimisée', opt.original + ' → ' + opt.dims + ', ' + enKo(opt.octets));
+
+    // --- Étape 2 : appel Vision ---
+    avancer(25, '🔍 Lecture du ticket par Google…');
+    const base64 = opt.dataUrl.split(',')[1];
+    if(!base64){ throw new Error("Encodage de la photo impossible"); }
+    noterEtapeScan('Envoi à Google Vision', enKo(base64.length * 3 / 4));
+    const data = await appelVisionAvecTimeout(cleApi, base64, 45000);
+    noterEtapeScan('Réponse de Google reçue');
+
+    clearInterval(progressInterval); progressInterval = null;
+
+    // --- Étape 3 : texte brut ---
+    avancer(85, '📝 Analyse du texte…');
+    const texte = (data && data.responses && data.responses[0]
+      && data.responses[0].fullTextAnnotation && data.responses[0].fullTextAnnotation.text) || '';
+    console.log('[SCAN TICKET] Texte brut reconnu :\n' + texte);
+    if(!texte.trim()){
+      throw new Error("Google n'a trouvé aucun texte sur cette photo. Rapprochez-vous du ticket, "
+        + "à plat et bien éclairé, sans ombre portée.");
+    }
+    noterEtapeScan('Texte reconnu', texte.split('\n').filter(l => l.trim()).length + ' lignes');
+
+    // --- Étape 4 : extraction des articles ---
+    const articles = extraireArticlesTicket(texte);
+    noterEtapeScan('Articles extraits', articles.length + ' article(s)');
+    avancer(95, '✅ Terminé');
+
+    if(!articles.length){
+      // Le texte a bien été lu mais aucune ligne n'a pu être interprétée comme un article :
+      // on montre le texte brut, seul moyen de comprendre pourquoi le découpage a échoué.
+      afficherDiagnosticScanTicket(
+        new Error("Le texte du ticket a bien été lu, mais aucune ligne n'a pu être interprétée comme un article."),
+        texte
+      );
+      return;
     }
 
-    progressBar.style.width = '90%';
-    
-    // Étape 2 : Extraire les articles
-    const articles = extraireArticlesTicket(text);
-    progressBar.style.width = '95%';
-    
-    // Étape 3 : Afficher les résultats
-    afficherResultatOCR(articles, text);
-    progressBar.style.width = '100%';
-    
-    // Attendre un peu et retirer la barre
-    setTimeout(() => {
-      clearInterval(progressInterval);
-      progressDiv.remove();
-    }, 500);
-    
-  } catch(err) {
-    console.error('Erreur OCR:', err);
-    clearInterval(progressInterval);
-    progressDiv.remove();
-    toast('❌ Erreur lors de la lecture du ticket : ' + (err.message || ''));
-  } finally {
+    afficherResultatOCR(articles, texte);
+    avancer(100, '✅ Terminé');
+
+  }catch(err){
+    console.error('[SCAN TICKET] Échec à l\'étape "' + derniereEtapeScan + '" :', err);
+    afficherDiagnosticScanTicket(err);
+  }finally{
+    if(progressInterval) clearInterval(progressInterval);
+    if(progressDiv && progressDiv.parentNode) progressDiv.parentNode.removeChild(progressDiv);
     ocrEnCours = false;
+    // Indispensable : le bouton « 📷 Ticket » est rendu avec l'attribut disabled tant que
+    // ocrEnCours vaut true. Sans ce rendu, il resterait grisé et les clics suivants
+    // sembleraient « ne rien faire ». rendre() ne touche pas à la feuille ouverte.
+    try{ rendre(); }catch(e){ console.error(e); }
+  }
+}
+
+/* Écran de diagnostic : affiché dès que le scan échoue, pour ne plus jamais avoir
+   à deviner ce qui s'est passé. Reprend le journal des étapes et, le cas échéant,
+   le texte brut renvoyé par Google. */
+function afficherDiagnosticScanTicket(err, texteBrut){
+  const message = (err && err.message) ? err.message : String(err || 'erreur inconnue');
+  const lignes = journalScanTicket.length ? journalScanTicket : ['(aucune étape enregistrée)'];
+
+  const rapport = 'DIAGNOSTIC SCAN TICKET\n'
+    + 'Échec à l\'étape : ' + derniereEtapeScan + '\n'
+    + 'Message : ' + message + '\n\n'
+    + 'Étapes :\n' + lignes.map(l => ' - ' + l).join('\n')
+    + (texteBrut ? '\n\nTexte brut lu par Google :\n' + texteBrut : '');
+
+  let h = '<div class="sheet-hd"><h2>⚠️ Le scan n\'a pas abouti</h2><button data-act="close">Fermer</button></div>';
+  h += '<div style="padding:0 var(--pad) var(--pad)">';
+  h += '<div style="background:#FDECEA;border-left:3px solid #D32F2F;padding:12px;border-radius:4px;margin-bottom:14px">'
+     + '<strong style="display:block;margin-bottom:4px">Ce qui s\'est passé</strong>'
+     + '<span style="font-size:13px;line-height:1.45">' + esc(message) + '</span></div>';
+
+  h += '<div class="sec"><div class="sec-hd"><span>Étapes franchies</span></div>';
+  h += '<ol style="margin:0;padding-left:20px;font-size:12.5px;line-height:1.6">'
+     + lignes.map(l => '<li>' + esc(l) + '</li>').join('') + '</ol></div>';
+
+  if(texteBrut){
+    h += '<div class="sec"><div class="sec-hd"><span>Texte brut lu par Google</span></div>'
+       + '<pre style="white-space:pre-wrap;word-break:break-word;font-size:11.5px;background:var(--craie,#f5f5f5);'
+       + 'padding:10px;border-radius:6px;max-height:260px;overflow:auto;margin:0">' + esc(texteBrut) + '</pre></div>';
+  }
+
+  h += '<div class="sheet-acts">'
+     + '<button class="btn-main" data-act="copierDiagnosticScan">📋 Copier le diagnostic</button>'
+     + '<button class="btn-second" data-act="close">Fermer</button></div>';
+  h += '</div>';
+
+  window.__rapportScanTicket = rapport;
+  SHEET.innerHTML = h;
+  ouvrirSheet();
+}
+
+function copierDiagnosticScan(){
+  const txt = window.__rapportScanTicket || '';
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt)
+      .then(() => toast('✓ Diagnostic copié'))
+      .catch(() => toast('Copie refusée par le navigateur'));
+  } else {
+    toast('Copie non supportée par ce navigateur');
   }
 }
 
@@ -3208,96 +3427,143 @@ function extraireArticlesTicket(texte){
   return articles.slice(0, 100);
 }
 
-function afficherResultatOCR(articles, texteComplet){
-  const totalExtrait = articles.reduce((s, a) => s + (a.montant * a.qte), 0);
-  
-  // Créer une version éditable des articles
-  const articlesHtml = articles.map((a, idx) => `
-    <div class="card" style="display:grid;grid-template-columns:1fr 120px;gap:12px;align-items:center">
-      <div class="card-body">
-        <div class="card-title" style="font-size:14px">${esc(a.nom)}</div>
-        <div class="card-meta" style="font-size:11px;color:var(--gris);margin-top:4px">
-          Détecté avec confiance
-        </div>
-      </div>
-      <div class="card-amt" style="text-align:right">
-        <div style="font-family:var(--mono);font-weight:700;color:var(--encre)">${a.montant.toFixed(2)}€</div>
-        <input type="number" 
-               step="0.01" 
-               min="0" 
-               value="${a.montant.toFixed(2)}" 
-               class="input-edit" 
-               id="montant-${idx}"
-               style="width:100%;margin-top:4px;font-size:11px;padding:4px;border:1px solid var(--gris-clair);border-radius:4px"
-               onchange="articles[${idx}].montant = parseFloat(this.value) || ${a.montant}">
-      </div>
-    </div>
-  `).join('');
-  
-  let html = `
-    <div class="sheet-hd">
-      <h2>📸 Résultat du scan ticket</h2>
-      <button onclick="fermerFeuille()">✕</button>
-    </div>
-    <div style="padding:0 var(--pad) var(--pad)">
-      
-      <!-- RÉSUMÉ -->
-      <div style="background:linear-gradient(135deg, var(--outremer) 0%, #0052cc 100%);color:white;padding:16px;border-radius:12px;margin-bottom:16px">
-        <div style="font-size:12px;opacity:0.9;margin-bottom:4px">💰 Total extrait</div>
-        <div style="font-family:var(--mono);font-size:28px;font-weight:700">${totalExtrait.toFixed(2)}€</div>
-        <div style="font-size:11px;opacity:0.8;margin-top:6px">${articles.length} article(s) détecté(s) • Vérifiez les montants ↓</div>
-      </div>
+/* Articles du ticket en cours de vérification.
+   Ils vivent dans cette variable plutôt que sérialisés dans le HTML : l'ancienne version
+   injectait JSON.stringify(articles) dans un attribut onclick délimité par des guillemets
+   doubles, or le JSON en contient à chaque champ. Le navigateur refermait donc l'attribut
+   dès le premier champ, et le bouton « Ajouter au budget » ne pouvait plus rien déclencher
+   — un clic sans le moindre effet ni message d'erreur. */
+let articlesTicketEnCours = [];
+let texteBrutTicketEnCours = '';
 
-      <!-- ARTICLES AVEC ÉDITION -->
-      <div class="sec">
-        <div class="sec-hd">
-          <span>📋 Articles détectés</span>
-          <span style="font-size:11px;font-weight:400;color:var(--gris)">(Cliquez pour corriger)</span>
-        </div>
-        ${articlesHtml}
-      </div>
-      
-      <!-- ACTIONS -->
-      <div class="sec" style="margin-bottom:0">
-        <button class="btn btn-primary" style="width:100%;margin-bottom:8px;padding:14px" 
-                onclick="validerTicketOCRAvecEdition('${JSON.stringify(articles).replace(/'/g, '&apos;')}')">
-          ✓ Ajouter au budget (${totalExtrait.toFixed(2)}€)
-        </button>
-        <button class="btn btn-secondary" style="width:100%;padding:12px" onclick="fermerFeuille()">
-          ✕ Annuler
-        </button>
-      </div>
-      
-      <!-- CONSEIL -->
-      <div style="margin-top:16px;padding:12px;background:var(--craie);border-left:3px solid var(--outremer);border-radius:4px;font-size:12px">
-        <strong>💡 Conseil :</strong><br>
-        • Vérifiez que le total correspond à votre ticket<br>
-        • Vous pouvez corriger les montants ci-dessus<br>
-        • Les articles seront ajoutés à la catégorie "Alimentaire"
-      </div>
-    </div>
-  `;
-  
-  SHEET.innerHTML = html;
+function totalTicketEnCours(){
+  return articlesTicketEnCours.reduce((s, a) =>
+    s + (Number(a.montant) || 0) * (Number(a.qte) || 1), 0);
+}
+
+function majTotalTicket(){
+  const total = totalTicketEnCours().toFixed(2);
+  const elTotal = document.getElementById('ticketTotal');
+  if(elTotal) elTotal.textContent = total + '€';
+  const elCompte = document.getElementById('ticketCompte');
+  if(elCompte) elCompte.textContent = articlesTicketEnCours.length + ' article(s) • vérifiez avant de valider';
+  const btn = document.getElementById('ticketValider');
+  if(btn) btn.textContent = '✓ Ajouter au budget et au frigo (' + total + '€)';
+}
+
+/* L'OCR d'un ticket est faillible : le nom, la quantité et le montant sont tous
+   corrigeables avant validation, puisque ces valeurs alimentent ensuite le frigo. */
+function majLigneTicket(idx, champ, valeur){
+  const a = articlesTicketEnCours[idx];
+  if(!a) return;
+  if(champ === 'nom'){
+    a.nom = String(valeur);
+  } else if(champ === 'montant'){
+    const n = parseFloat(String(valeur).replace(',', '.'));
+    a.montant = isNaN(n) || n < 0 ? 0 : n;
+  } else if(champ === 'qte'){
+    const n = parseInt(valeur, 10);
+    a.qte = (isNaN(n) || n < 1) ? 1 : n;
+  }
+  majTotalTicket();
+}
+
+function supprimerLigneTicket(idx){
+  const i = parseInt(idx, 10);
+  if(isNaN(i) || !articlesTicketEnCours[i]) return;
+  articlesTicketEnCours.splice(i, 1);
+  if(!articlesTicketEnCours.length){
+    fermerFeuille();
+    toast('Aucun article conservé, rien n\'a été enregistré');
+    return;
+  }
+  afficherResultatOCR(articlesTicketEnCours, texteBrutTicketEnCours);
+}
+
+function afficherResultatOCR(articles, texteComplet){
+  articlesTicketEnCours = articles;
+  if(typeof texteComplet === 'string') texteBrutTicketEnCours = texteComplet;
+
+  const total = totalTicketEnCours().toFixed(2);
+
+  const articlesHtml = articles.map((a, idx) =>
+      '<div class="card" style="display:block;padding:10px">'
+    +   '<input type="text" value="' + esc(a.nom) + '" aria-label="Nom de l\'article"'
+    +     ' style="width:100%;font-size:13.5px;font-weight:600;padding:6px;border:1px solid var(--gris-clair,#ccc);border-radius:4px;background:transparent"'
+    +     ' oninput="majLigneTicket(' + idx + ',\'nom\',this.value)">'
+    +   '<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;margin-top:8px">'
+    +     '<div><label style="font-size:10.5px;color:var(--gris,#777);display:block;margin-bottom:2px">Quantité</label>'
+    +       '<input type="number" min="1" step="1" inputmode="numeric" value="' + (Number(a.qte) || 1) + '"'
+    +       ' style="width:100%;font-size:12px;padding:5px;border:1px solid var(--gris-clair,#ccc);border-radius:4px"'
+    +       ' oninput="majLigneTicket(' + idx + ',\'qte\',this.value)"></div>'
+    +     '<div><label style="font-size:10.5px;color:var(--gris,#777);display:block;margin-bottom:2px">Prix (€)</label>'
+    +       '<input type="number" min="0" step="0.01" inputmode="decimal" value="' + (Number(a.montant) || 0).toFixed(2) + '"'
+    +       ' style="width:100%;font-size:12px;padding:5px;border:1px solid var(--gris-clair,#ccc);border-radius:4px"'
+    +       ' oninput="majLigneTicket(' + idx + ',\'montant\',this.value)"></div>'
+    +     '<button class="icon-btn" data-act="supprimerLigneTicket" data-id="' + idx + '"'
+    +       ' title="Retirer cette ligne" style="padding:6px 10px">✕</button>'
+    +   '</div>'
+    + '</div>'
+  ).join('');
+
+  let h = '<div class="sheet-hd"><h2>📸 Résultat du scan</h2><button data-act="close">Fermer</button></div>';
+  h += '<div style="padding:0 var(--pad) var(--pad)">';
+
+  h += '<div style="background:linear-gradient(135deg,var(--outremer,#1B34C4) 0%,#0052cc 100%);color:white;'
+     + 'padding:16px;border-radius:12px;margin-bottom:16px">'
+     + '<div style="font-size:12px;opacity:.9;margin-bottom:4px">💰 Total extrait</div>'
+     + '<div id="ticketTotal" style="font-family:var(--mono,monospace);font-size:28px;font-weight:700">' + total + '€</div>'
+     + '<div id="ticketCompte" style="font-size:11px;opacity:.8;margin-top:6px">'
+     + articles.length + ' article(s) • vérifiez avant de valider</div></div>';
+
+  h += '<div class="sec"><div class="sec-hd"><span>📋 Articles détectés</span>'
+     + '<span style="font-size:11px;font-weight:400;color:var(--gris,#777)">Tout est corrigeable</span></div>'
+     + articlesHtml + '</div>';
+
+  h += '<div class="sec" style="margin-bottom:0">'
+     + '<button class="btn-main" id="ticketValider" data-act="validerTicketScan" style="width:100%;padding:14px;margin-bottom:8px">'
+     + '✓ Ajouter au budget et au frigo (' + total + '€)</button>'
+     + '<button class="btn-second" data-act="close" style="width:100%;padding:12px">✕ Annuler</button></div>';
+
+  h += '<div style="margin-top:16px;padding:12px;background:var(--craie,#f5f5f5);'
+     + 'border-left:3px solid var(--outremer,#1B34C4);border-radius:4px;font-size:12px;line-height:1.5">'
+     + '<strong>💡 Avant de valider</strong><br>'
+     + '• Corrigez les noms mal lus : ils serviront de nom d\'article dans le frigo<br>'
+     + '• Retirez les lignes qui ne sont pas des produits (✕)<br>'
+     + '• La dépense part dans le budget en catégorie « Alimentaire »</div>';
+
+  if(texteBrutTicketEnCours){
+    h += '<details style="margin-top:12px"><summary style="font-size:12px;color:var(--gris,#777);cursor:pointer">'
+       + 'Voir le texte brut lu par Google</summary>'
+       + '<pre style="white-space:pre-wrap;word-break:break-word;font-size:11px;background:var(--craie,#f5f5f5);'
+       + 'padding:10px;border-radius:6px;max-height:240px;overflow:auto;margin:8px 0 0">'
+       + esc(texteBrutTicketEnCours) + '</pre></details>';
+  }
+
+  h += '</div>';
+
+  SHEET.innerHTML = h;
   ouvrirSheet();
 }
 
-function validerTicketOCRAvecEdition(articlesJson){
-  try {
-    let articles = JSON.parse(articlesJson);
-    
-    // Récupérer les valeurs éditées depuis les inputs
-    articles.forEach((a, idx) => {
-      const input = document.getElementById('montant-' + idx);
-      if(input){
-        a.montant = parseFloat(input.value) || a.montant;
-      }
-    });
-    
+function validerTicketOCRAvecEdition(){
+  try{
+    const articles = articlesTicketEnCours
+      .map(a => ({
+        nom: String(a.nom || '').trim(),
+        montant: Number(a.montant) || 0,
+        qte: Number(a.qte) || 1
+      }))
+      .filter(a => a.nom && a.montant > 0);
+
+    if(!articles.length){
+      toast('❌ Aucun article valide : il faut un nom et un prix supérieur à 0');
+      return;
+    }
     validerTicketOCR(JSON.stringify(articles));
-  } catch(err) {
-    console.error('Erreur validation:', err);
-    toast('❌ Erreur lors de la validation');
+  }catch(err){
+    console.error('Erreur validation ticket:', err);
+    toast('❌ Erreur lors de la validation : ' + (err.message || ''));
   }
 }
 
@@ -3785,6 +4051,11 @@ document.addEventListener("click", e => {
 
     // --- feuille générique / commun ---
     case "close": fermerFeuille(); break;
+
+    // --- scan de ticket de caisse ---
+    case "copierDiagnosticScan": copierDiagnosticScan(); break;
+    case "validerTicketScan": validerTicketOCRAvecEdition(); break;
+    case "supprimerLigneTicket": supprimerLigneTicket(id); break;
     case "sauvegardes": ouvrirSauvegardes(); break;
     case "faireSave": faireSave(); break;
     case "restaurer": restaurer(id); break;
@@ -3813,13 +4084,10 @@ function brancherExportImport(){
         const p = JSON.parse(ev.target.result);
         if(!p || typeof p!=="object") throw new Error("format");
         const avant = JSON.parse(JSON.stringify(D));
-        D = { v:4, courses:p.courses||[], rdv:p.rdv||[], evenements:p.evenements||[], taches:p.taches||[],
-          historique:p.historique||[],
-          sante:p.sante||[], programme:p.programme||[], voiture:p.voiture||[],
-          frigo:p.frigo||[], recettes_favorites:p.recettes_favorites||[],
-          regles:p.regles||[], trousseRegles:p.trousseRegles||null,
-          repas:p.repas||[], objectifsNutrition:p.objectifsNutrition||null,
-          depenses:p.depenses||[] };
+        // Même normalisation qu'au chargement. L'ancienne version reconstruisait D à la main
+        // ici en oubliant frigoSync, stats et alertes : après une restauration, ouvrir
+        // l'onglet Frigo plantait sur D.frigoSync.autoSuggest.
+        D = normaliserDonnees(p);
         if(!D.trousseRegles || !Array.isArray(D.trousseRegles.items) || !D.trousseRegles.items.length){
           D.trousseRegles = trousseParDefaut();
         }
@@ -3908,6 +4176,7 @@ function afficherStatsFrigo(){
 }
 
 function togglSyncFrigoCoursesAuto(){
+  if(!D.frigoSync || typeof D.frigoSync !== 'object') D.frigoSync = { autoSuggest: true };
   D.frigoSync.autoSuggest = !D.frigoSync.autoSuggest;
   sauver();
   rendre();
