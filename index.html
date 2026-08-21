@@ -14,15 +14,15 @@
 <title>Vie Perso</title>
 <style>
 :root{
-  --outremer:#1B34C4;
-  --craie:#F1F2ED;
+  --outremer:#2E4BD6;
+  --craie:#F4F4F1;
   --blanc:#FFFFFF;
-  --encre:#14181F;
-  --gris:#6A7280;
-  --gris-clair:#D9DCD6;
-  --signal:#F5A300;
-  --vert:#0F7F58;
-  --rouge:#C0392B;
+  --encre:#1C2028;
+  --gris:#767D89;
+  --gris-clair:#E2E4E0;
+  --signal:#E8A33D;
+  --vert:#2A9D6F;
+  --rouge:#D85B4A;
   --mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,"Liberation Mono",monospace;
   --ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   --r:14px;
@@ -507,8 +507,7 @@ function openSettingsPanel() {
   h += '<button onclick="logout()" style="width:100%;padding:15px;background:var(--blanc);border:1.5px solid var(--rouge);color:var(--rouge);font-weight:700;font-size:15px;border-radius:16px;cursor:pointer;transition:background .15s" onmousedown="this.style.background=\'#fdf0ee\'" onmouseup="this.style.background=\'var(--blanc)\'">Se déconnecter</button>';
   h += '</div>';
   s.innerHTML = h;
-  v.classList.remove('hidden');
-  v.onclick = closeSettings;
+  ouvrirSheet();
 }
 
 async function changePassword() {
@@ -530,8 +529,7 @@ function logout() {
 }
 
 function closeSettings() {
-  document.getElementById('veil').classList.add('hidden');
-  document.getElementById('sheet').innerHTML = '';
+  fermerFeuille();
 }
 
 // Vérifier auth AVANT d'initialiser le dashboard
