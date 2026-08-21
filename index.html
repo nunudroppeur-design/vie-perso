@@ -4285,16 +4285,10 @@ window.addEventListener('appinstalled', () => {
 </div>
 
 
-/* ======================== AUTHENTIFICATION ======================== */
+// Version corrigée du système d'authentification
+// À remplacer dans le fichier
 
-// Initialiser le mot de passe par défaut
-function initAuth() {
-  if (!localStorage.getItem('viePersoPassword')) {
-    hashPassword('test').then(hash => {
-      localStorage.setItem('viePersoPassword', hash);
-    });
-  }
-}
+/* ======================== AUTHENTIFICATION ======================== */
 
 // Fonction de hachage SHA-256
 async function hashPassword(pwd) {
@@ -4303,6 +4297,16 @@ async function hashPassword(pwd) {
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Initialiser le mot de passe par défaut
+async function initAuth() {
+  const stored = localStorage.getItem('viePersoPassword');
+  if (!stored) {
+    const defaultHash = await hashPassword('test');
+    localStorage.setItem('viePersoPassword', defaultHash);
+    console.log('✓ Auth initialisé avec mot de passe: test');
+  }
 }
 
 // Vérifier la connexion
@@ -4319,6 +4323,11 @@ async function verifyPassword() {
   const hashed = await hashPassword(pwd);
   const storedHash = localStorage.getItem('viePersoPassword');
   
+  console.log('Input:', pwd);
+  console.log('Hash entré:', hashed);
+  console.log('Hash stocké:', storedHash);
+  console.log('Correspondance:', hashed === storedHash);
+  
   if (hashed === storedHash) {
     localStorage.setItem('viePersoAuthenticated', 'true');
     showDashboard();
@@ -4333,21 +4342,30 @@ async function verifyPassword() {
 
 // Afficher le dashboard
 function showDashboard() {
-  document.getElementById('authScreen').classList.add('hidden');
-  document.getElementById('dashboardContent').style.display = 'block';
+  const authScreen = document.getElementById('authScreen');
+  const dashboard = document.getElementById('dashboardContent');
+  
+  if (authScreen) authScreen.classList.add('hidden');
+  if (dashboard) dashboard.style.display = 'block';
+  console.log('✓ Dashboard affiché');
 }
 
 // Vérifier l'authentification au chargement
-function checkAuthOnLoad() {
-  initAuth();
-  setTimeout(() => {
-    if (localStorage.getItem('viePersoAuthenticated') === 'true') {
-      showDashboard();
-    } else {
-      document.getElementById('authScreen').classList.remove('hidden');
-      document.getElementById('dashboardContent').style.display = 'none';
-    }
-  }, 100);
+async function checkAuthOnLoad() {
+  console.log('🔐 Vérification authentification...');
+  
+  await initAuth();
+  
+  if (localStorage.getItem('viePersoAuthenticated') === 'true') {
+    console.log('✓ Utilisateur déjà authentifié');
+    showDashboard();
+  } else {
+    console.log('⚠ Pas d\'authentification, affichage du login');
+    const authScreen = document.getElementById('authScreen');
+    const dashboard = document.getElementById('dashboardContent');
+    if (authScreen) authScreen.classList.remove('hidden');
+    if (dashboard) dashboard.style.display = 'none';
+  }
 }
 
 // Permettre la connexion avec Entrée
@@ -4363,7 +4381,12 @@ function openSettingsPanel() {
   const sheet = document.getElementById('sheet');
   const veil = document.getElementById('veil');
   
-  let html = '<div class="sheet-hd"><h2>Paramètres</h2><button data-act="close" style="font-size:20px;width:32px;height:32px">✕</button></div>';
+  if (!sheet || !veil) {
+    alert('Erreur: éléments modaux non trouvés');
+    return;
+  }
+  
+  let html = '<div class="sheet-hd"><h2>Paramètres</h2><button data-act="close" style="font-size:20px;width:32px;height:32px;background:none;border:none;cursor:pointer">✕</button></div>';
   html += '<div class="sheet-bd">';
   html += '<div class="sec">';
   html += '<div class="sec-hd"><span>Changer le mot de passe</span></div>';
@@ -4379,7 +4402,8 @@ function openSettingsPanel() {
   sheet.innerHTML = html;
   veil.classList.remove('hidden');
   veil.onclick = closeSettings;
-  sheet.querySelector('[data-act="close"]').onclick = closeSettings;
+  const closeBtn = sheet.querySelector('[data-act="close"]');
+  if (closeBtn) closeBtn.onclick = closeSettings;
 }
 
 // Changer le mot de passe
@@ -4418,9 +4442,15 @@ function logout() {
 
 // Fermer le panneau Paramètres
 function closeSettings() {
-  document.getElementById('veil').classList.add('hidden');
-  document.getElementById('sheet').innerHTML = '';
+  const veil = document.getElementById('veil');
+  const sheet = document.getElementById('sheet');
+  if (veil) veil.classList.add('hidden');
+  if (sheet) sheet.innerHTML = '';
 }
 
 // Lancer l'authentification au chargement
 checkAuthOnLoad();
+
+</script>
+</body>
+</html>
