@@ -290,9 +290,37 @@ body.shop .card-acts{display:none}
   .form-row{grid-template-columns:1fr}
   .chart-container{height:280px}.chart-wrapper{height:240px}
 }
+
+/* ======================== AUTHENTIFICATION ======================== */
+#authScreen{position:fixed;top:0;left:0;right:0;bottom:0;background:var(--outremer);display:flex;align-items:center;justify-content:center;z-index:9999;flex-direction:column;padding:20px}
+#authScreen.hidden{display:none}
+.auth-box{background:var(--blanc);border-radius:16px;padding:40px;width:100%;max-width:320px;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.auth-box h1{font-size:24px;font-weight:700;margin-bottom:8px;text-align:center}
+.auth-box .subtitle{font-size:14px;color:var(--gris);text-align:center;margin-bottom:24px}
+.auth-box input{width:100%;padding:12px 14px;border:1px solid var(--gris-clair);border-radius:var(--r);font-size:16px;margin-bottom:16px}
+.auth-box input:focus{outline:none;border-color:var(--outremer);box-shadow:0 0 0 3px rgba(27,52,196,.1)}
+.auth-box button{width:100%;padding:12px;border-radius:var(--r);background:var(--outremer);color:#fff;font-weight:700;font-size:15px;transition:background .2s;cursor:pointer}
+.auth-box button:hover{background:#0f28a8}
+.auth-box .error{color:var(--rouge);font-size:13px;margin-bottom:12px;text-align:center;min-height:18px}
+.top .settings-btn{font-size:20px;cursor:pointer;padding:4px 8px;border-radius:6px;transition:background .2s}
+.top .settings-btn:hover{background:var(--craie)}
 </style>
-</head>
 <body>
+
+<!-- ÉCRAN DE LOGIN -->
+<div id="authScreen" class="">
+  <div class="auth-box">
+    <h1>Vie Perso</h1>
+    <div class="subtitle">Accès sécurisé</div>
+    <div id="authError" class="error"></div>
+    <input id="authPassword" type="password" placeholder="Mot de passe" autocomplete="off">
+    <button onclick="verifyPassword()">Se connecter</button>
+  </div>
+</div>
+
+<!-- DASHBOARD CONTENT (caché jusqu'à auth) -->
+<div id="dashboardContent" style="display:none">
+>
 
 <div class="top">
   <h1 id="titrePage">Vie Perso</h1>
@@ -4253,3 +4281,146 @@ window.addEventListener('appinstalled', () => {
 </script>
 </body>
 </html>
+
+</div>
+
+
+/* ======================== AUTHENTIFICATION ======================== */
+
+// Initialiser le mot de passe par défaut
+function initAuth() {
+  if (!localStorage.getItem('viePersoPassword')) {
+    hashPassword('test').then(hash => {
+      localStorage.setItem('viePersoPassword', hash);
+    });
+  }
+}
+
+// Fonction de hachage SHA-256
+async function hashPassword(pwd) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(pwd);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Vérifier la connexion
+async function verifyPassword() {
+  const input = document.getElementById('authPassword');
+  const pwd = input.value;
+  const errorDiv = document.getElementById('authError');
+  
+  if (!pwd) {
+    errorDiv.textContent = 'Veuillez entrer un mot de passe';
+    return;
+  }
+  
+  const hashed = await hashPassword(pwd);
+  const storedHash = localStorage.getItem('viePersoPassword');
+  
+  if (hashed === storedHash) {
+    localStorage.setItem('viePersoAuthenticated', 'true');
+    showDashboard();
+    input.value = '';
+    errorDiv.textContent = '';
+  } else {
+    errorDiv.textContent = 'Mot de passe incorrect';
+    input.value = '';
+    input.focus();
+  }
+}
+
+// Afficher le dashboard
+function showDashboard() {
+  document.getElementById('authScreen').classList.add('hidden');
+  document.getElementById('dashboardContent').style.display = 'block';
+}
+
+// Vérifier l'authentification au chargement
+function checkAuthOnLoad() {
+  initAuth();
+  setTimeout(() => {
+    if (localStorage.getItem('viePersoAuthenticated') === 'true') {
+      showDashboard();
+    } else {
+      document.getElementById('authScreen').classList.remove('hidden');
+      document.getElementById('dashboardContent').style.display = 'none';
+    }
+  }, 100);
+}
+
+// Permettre la connexion avec Entrée
+document.addEventListener('keydown', (e) => {
+  const authInput = document.getElementById('authPassword');
+  if (e.key === 'Enter' && authInput && authInput.offsetParent !== null) {
+    verifyPassword();
+  }
+});
+
+// Ouvrir le panneau Paramètres
+function openSettingsPanel() {
+  const sheet = document.getElementById('sheet');
+  const veil = document.getElementById('veil');
+  
+  let html = '<div class="sheet-hd"><h2>Paramètres</h2><button data-act="close" style="font-size:20px;width:32px;height:32px">✕</button></div>';
+  html += '<div class="sheet-bd">';
+  html += '<div class="sec">';
+  html += '<div class="sec-hd"><span>Changer le mot de passe</span></div>';
+  html += '<div style="display:flex; flex-direction:column; gap:12px">';
+  html += '<input id="newPassword1" type="password" placeholder="Nouveau mot de passe" style="padding:12px 14px; border:1px solid var(--gris-clair); border-radius:var(--r); font-size:16px">';
+  html += '<input id="newPassword2" type="password" placeholder="Confirmer" style="padding:12px 14px; border:1px solid var(--gris-clair); border-radius:var(--r); font-size:16px">';
+  html += '<button onclick="changePassword()" style="padding:12px; background:var(--outremer); color:#fff; border-radius:var(--r); font-weight:700; font-size:15px; cursor:pointer">Mettre à jour</button>';
+  html += '<button onclick="logout()" style="padding:12px; background:var(--rouge); color:#fff; border-radius:var(--r); font-weight:700; font-size:15px; margin-top:12px; cursor:pointer">Se déconnecter</button>';
+  html += '</div>';
+  html += '</div>';
+  html += '</div>';
+  
+  sheet.innerHTML = html;
+  veil.classList.remove('hidden');
+  veil.onclick = closeSettings;
+  sheet.querySelector('[data-act="close"]').onclick = closeSettings;
+}
+
+// Changer le mot de passe
+async function changePassword() {
+  const pwd1 = document.getElementById('newPassword1').value;
+  const pwd2 = document.getElementById('newPassword2').value;
+  
+  if (!pwd1 || !pwd2) {
+    alert('Veuillez remplir les deux champs');
+    return;
+  }
+  
+  if (pwd1 !== pwd2) {
+    alert('Les mots de passe ne correspondent pas');
+    return;
+  }
+  
+  if (pwd1.length < 4) {
+    alert('Le mot de passe doit avoir au moins 4 caractères');
+    return;
+  }
+  
+  const hashed = await hashPassword(pwd1);
+  localStorage.setItem('viePersoPassword', hashed);
+  alert('Mot de passe mis à jour avec succès !');
+  closeSettings();
+}
+
+// Se déconnecter
+function logout() {
+  if (confirm('Êtes-vous sûr de vouloir vous déconnecter ?')) {
+    localStorage.removeItem('viePersoAuthenticated');
+    location.reload();
+  }
+}
+
+// Fermer le panneau Paramètres
+function closeSettings() {
+  document.getElementById('veil').classList.add('hidden');
+  document.getElementById('sheet').innerHTML = '';
+}
+
+// Lancer l'authentification au chargement
+checkAuthOnLoad();
