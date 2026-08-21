@@ -291,36 +291,22 @@ body.shop .card-acts{display:none}
   .chart-container{height:280px}.chart-wrapper{height:240px}
 }
 
-/* ======================== AUTHENTIFICATION ======================== */
-#authScreen{position:fixed;top:0;left:0;right:0;bottom:0;background:var(--outremer);display:flex;align-items:center;justify-content:center;z-index:9999;flex-direction:column;padding:20px}
+/* ======================== AUTH ======================== */
+#authScreen{position:fixed;top:0;left:0;right:0;bottom:0;background:var(--outremer);display:flex;align-items:center;justify-content:center;z-index:9999}
 #authScreen.hidden{display:none}
-.auth-box{background:var(--blanc);border-radius:16px;padding:40px;width:100%;max-width:320px;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.auth-box{background:var(--blanc);border-radius:16px;padding:40px;width:90%;max-width:320px;box-shadow:0 20px 60px rgba(0,0,0,.2)}
 .auth-box h1{font-size:24px;font-weight:700;margin-bottom:8px;text-align:center}
 .auth-box .subtitle{font-size:14px;color:var(--gris);text-align:center;margin-bottom:24px}
 .auth-box input{width:100%;padding:12px 14px;border:1px solid var(--gris-clair);border-radius:var(--r);font-size:16px;margin-bottom:16px}
-.auth-box input:focus{outline:none;border-color:var(--outremer);box-shadow:0 0 0 3px rgba(27,52,196,.1)}
-.auth-box button{width:100%;padding:12px;border-radius:var(--r);background:var(--outremer);color:#fff;font-weight:700;font-size:15px;transition:background .2s;cursor:pointer}
+.auth-box input:focus{outline:none;border-color:var(--outremer)}
+.auth-box button{width:100%;padding:12px;border-radius:var(--r);background:var(--outremer);color:#fff;font-weight:700;cursor:pointer}
 .auth-box button:hover{background:#0f28a8}
 .auth-box .error{color:var(--rouge);font-size:13px;margin-bottom:12px;text-align:center;min-height:18px}
-.top .settings-btn{font-size:20px;cursor:pointer;padding:4px 8px;border-radius:6px;transition:background .2s}
+.top .settings-btn{font-size:20px;cursor:pointer;padding:4px 8px;border-radius:6px}
 .top .settings-btn:hover{background:var(--craie)}
 </style>
 <body>
-
-<!-- ÉCRAN DE LOGIN -->
-<div id="authScreen" class="">
-  <div class="auth-box">
-    <h1>Vie Perso</h1>
-    <div class="subtitle">Accès sécurisé</div>
-    <div id="authError" class="error"></div>
-    <input id="authPassword" type="password" placeholder="Mot de passe" autocomplete="off">
-    <button onclick="verifyPassword()">Se connecter</button>
-  </div>
-</div>
-
-<!-- DASHBOARD CONTENT (caché jusqu'à auth) -->
-<div id="dashboardContent" style="display:none">
->
+<div id="authScreen" class=""><div class="auth-box"><h1>Vie Perso</h1><div class="subtitle">Accès sécurisé</div><div id="authError" class="error"></div><input id="authPassword" type="password" placeholder="Mot de passe" autocomplete="off"><button onclick="verifyPassword()">Se connecter</button></div></div><div id="dashboardContent" style="display:none">>
 
 <div class="top">
   <h1 id="titrePage">Vie Perso</h1>
@@ -357,7 +343,92 @@ body.shop .card-acts{display:none}
 <!-- Modal gestion clé API -->
 
 
+
+</div>
 <script>
+
+// ======================== AUTHENTIFICATION ========================
+async function hashPassword(pwd) {
+  const enc = new TextEncoder();
+  const buf = await crypto.subtle.digest('SHA-256', enc.encode(pwd));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function initAuth() {
+  if (!localStorage.getItem('viePersoPassword')) {
+    const h = await hashPassword('test');
+    localStorage.setItem('viePersoPassword', h);
+  }
+}
+
+async function verifyPassword() {
+  const pwd = document.getElementById('authPassword').value;
+  const err = document.getElementById('authError');
+  if (!pwd) { err.textContent = 'Mot de passe requis'; return; }
+  const h = await hashPassword(pwd);
+  if (h === localStorage.getItem('viePersoPassword')) {
+    localStorage.setItem('viePersoAuthenticated', 'true');
+    document.getElementById('authScreen').classList.add('hidden');
+    document.getElementById('dashboardContent').style.display = 'block';
+  } else {
+    err.textContent = 'Incorrect';
+    document.getElementById('authPassword').value = '';
+  }
+}
+
+function showAuth() {
+  document.getElementById('authScreen').classList.remove('hidden');
+  document.getElementById('dashboardContent').style.display = 'none';
+}
+
+async function checkAuth() {
+  await initAuth();
+  if (localStorage.getItem('viePersoAuthenticated') !== 'true') {
+    showAuth();
+  }
+}
+
+function openSettingsPanel() {
+  const s = document.getElementById('sheet');
+  const v = document.getElementById('veil');
+  let h = '<div class="sheet-hd"><h2>Paramètres</h2><button onclick="closeSettings()" style="cursor:pointer">✕</button></div><div class="sheet-bd">';
+  h += '<input id="p1" type="password" placeholder="Nouveau mot de passe" style="width:100%;padding:12px;margin-bottom:12px;border:1px solid var(--gris-clair);border-radius:var(--r)">';
+  h += '<input id="p2" type="password" placeholder="Confirmer" style="width:100%;padding:12px;margin-bottom:12px;border:1px solid var(--gris-clair);border-radius:var(--r)">';
+  h += '<button onclick="changePassword()" style="width:100%;padding:12px;background:var(--outremer);color:#fff;cursor:pointer;border-radius:var(--r);margin-bottom:12px">Mettre à jour</button>';
+  h += '<button onclick="logout()" style="width:100%;padding:12px;background:var(--rouge);color:#fff;cursor:pointer;border-radius:var(--r)">Déconnecter</button>';
+  h += '</div>';
+  s.innerHTML = h;
+  v.classList.remove('hidden');
+  v.onclick = closeSettings;
+}
+
+async function changePassword() {
+  const p1 = document.getElementById('p1').value;
+  const p2 = document.getElementById('p2').value;
+  if (!p1 || p1 !== p2 || p1.length < 4) { alert('Erreur'); return; }
+  const h = await hashPassword(p1);
+  localStorage.setItem('viePersoPassword', h);
+  alert('Mis à jour !');
+  closeSettings();
+}
+
+function logout() {
+  if (confirm('Sûr ?')) {
+    localStorage.removeItem('viePersoAuthenticated');
+    location.reload();
+  }
+}
+
+function closeSettings() {
+  document.getElementById('veil').classList.add('hidden');
+  document.getElementById('sheet').innerHTML = '';
+}
+
+// Vérifier auth AVANT d'initialiser le dashboard
+checkAuth();
+
+
+
 "use strict";
 /* ======================= CHARGEMENT PARESSEUX DES LIBS EXTERNES ======================= */
 // Charge un script externe une seule fois (même en cas d'appels multiples/concurrents) et retourne une promesse.
@@ -4278,178 +4349,6 @@ window.addEventListener('appinstalled', () => {
   toast('App installée avec succès !');
 });
 
-</script>
-</body>
-</html>
-
-</div>
-
-
-// Version corrigée du système d'authentification
-// À remplacer dans le fichier
-
-/* ======================== AUTHENTIFICATION ======================== */
-
-// Fonction de hachage SHA-256
-async function hashPassword(pwd) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(pwd);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-// Initialiser le mot de passe par défaut
-async function initAuth() {
-  const stored = localStorage.getItem('viePersoPassword');
-  if (!stored) {
-    const defaultHash = await hashPassword('test');
-    localStorage.setItem('viePersoPassword', defaultHash);
-    console.log('✓ Auth initialisé avec mot de passe: test');
-  }
-}
-
-// Vérifier la connexion
-async function verifyPassword() {
-  const input = document.getElementById('authPassword');
-  const pwd = input.value;
-  const errorDiv = document.getElementById('authError');
-  
-  if (!pwd) {
-    errorDiv.textContent = 'Veuillez entrer un mot de passe';
-    return;
-  }
-  
-  const hashed = await hashPassword(pwd);
-  const storedHash = localStorage.getItem('viePersoPassword');
-  
-  console.log('Input:', pwd);
-  console.log('Hash entré:', hashed);
-  console.log('Hash stocké:', storedHash);
-  console.log('Correspondance:', hashed === storedHash);
-  
-  if (hashed === storedHash) {
-    localStorage.setItem('viePersoAuthenticated', 'true');
-    showDashboard();
-    input.value = '';
-    errorDiv.textContent = '';
-  } else {
-    errorDiv.textContent = 'Mot de passe incorrect';
-    input.value = '';
-    input.focus();
-  }
-}
-
-// Afficher le dashboard
-function showDashboard() {
-  const authScreen = document.getElementById('authScreen');
-  const dashboard = document.getElementById('dashboardContent');
-  
-  if (authScreen) authScreen.classList.add('hidden');
-  if (dashboard) dashboard.style.display = 'block';
-  console.log('✓ Dashboard affiché');
-}
-
-// Vérifier l'authentification au chargement
-async function checkAuthOnLoad() {
-  console.log('🔐 Vérification authentification...');
-  
-  await initAuth();
-  
-  if (localStorage.getItem('viePersoAuthenticated') === 'true') {
-    console.log('✓ Utilisateur déjà authentifié');
-    showDashboard();
-  } else {
-    console.log('⚠ Pas d\'authentification, affichage du login');
-    const authScreen = document.getElementById('authScreen');
-    const dashboard = document.getElementById('dashboardContent');
-    if (authScreen) authScreen.classList.remove('hidden');
-    if (dashboard) dashboard.style.display = 'none';
-  }
-}
-
-// Permettre la connexion avec Entrée
-document.addEventListener('keydown', (e) => {
-  const authInput = document.getElementById('authPassword');
-  if (e.key === 'Enter' && authInput && authInput.offsetParent !== null) {
-    verifyPassword();
-  }
-});
-
-// Ouvrir le panneau Paramètres
-function openSettingsPanel() {
-  const sheet = document.getElementById('sheet');
-  const veil = document.getElementById('veil');
-  
-  if (!sheet || !veil) {
-    alert('Erreur: éléments modaux non trouvés');
-    return;
-  }
-  
-  let html = '<div class="sheet-hd"><h2>Paramètres</h2><button data-act="close" style="font-size:20px;width:32px;height:32px;background:none;border:none;cursor:pointer">✕</button></div>';
-  html += '<div class="sheet-bd">';
-  html += '<div class="sec">';
-  html += '<div class="sec-hd"><span>Changer le mot de passe</span></div>';
-  html += '<div style="display:flex; flex-direction:column; gap:12px">';
-  html += '<input id="newPassword1" type="password" placeholder="Nouveau mot de passe" style="padding:12px 14px; border:1px solid var(--gris-clair); border-radius:var(--r); font-size:16px">';
-  html += '<input id="newPassword2" type="password" placeholder="Confirmer" style="padding:12px 14px; border:1px solid var(--gris-clair); border-radius:var(--r); font-size:16px">';
-  html += '<button onclick="changePassword()" style="padding:12px; background:var(--outremer); color:#fff; border-radius:var(--r); font-weight:700; font-size:15px; cursor:pointer">Mettre à jour</button>';
-  html += '<button onclick="logout()" style="padding:12px; background:var(--rouge); color:#fff; border-radius:var(--r); font-weight:700; font-size:15px; margin-top:12px; cursor:pointer">Se déconnecter</button>';
-  html += '</div>';
-  html += '</div>';
-  html += '</div>';
-  
-  sheet.innerHTML = html;
-  veil.classList.remove('hidden');
-  veil.onclick = closeSettings;
-  const closeBtn = sheet.querySelector('[data-act="close"]');
-  if (closeBtn) closeBtn.onclick = closeSettings;
-}
-
-// Changer le mot de passe
-async function changePassword() {
-  const pwd1 = document.getElementById('newPassword1').value;
-  const pwd2 = document.getElementById('newPassword2').value;
-  
-  if (!pwd1 || !pwd2) {
-    alert('Veuillez remplir les deux champs');
-    return;
-  }
-  
-  if (pwd1 !== pwd2) {
-    alert('Les mots de passe ne correspondent pas');
-    return;
-  }
-  
-  if (pwd1.length < 4) {
-    alert('Le mot de passe doit avoir au moins 4 caractères');
-    return;
-  }
-  
-  const hashed = await hashPassword(pwd1);
-  localStorage.setItem('viePersoPassword', hashed);
-  alert('Mot de passe mis à jour avec succès !');
-  closeSettings();
-}
-
-// Se déconnecter
-function logout() {
-  if (confirm('Êtes-vous sûr de vouloir vous déconnecter ?')) {
-    localStorage.removeItem('viePersoAuthenticated');
-    location.reload();
-  }
-}
-
-// Fermer le panneau Paramètres
-function closeSettings() {
-  const veil = document.getElementById('veil');
-  const sheet = document.getElementById('sheet');
-  if (veil) veil.classList.add('hidden');
-  if (sheet) sheet.innerHTML = '';
-}
-
-// Lancer l'authentification au chargement
-checkAuthOnLoad();
 
 </script>
 </body>
