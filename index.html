@@ -2289,6 +2289,14 @@ function ouvrirMenuScan() {
     + '<button class="btn-main" style="padding:10px 16px" onclick="scannerCodeManuel()">🔍</button>'
     + '</div></div>'
     + '<div style="border-top:1px solid #ddd;padding-top:12px;margin-top:4px">'
+    + '<label style="font-size:12px;color:#666;display:block;margin-bottom:6px">Ou chercher par nom de produit :</label>'
+    + '<div style="display:flex;gap:8px">'
+    + '<input type="text" id="rechNom" placeholder="Nutella, Comté AOP..." style="flex:1;padding:10px;border:1px solid #ccc;border-radius:4px">'
+    + '<button class="btn-main" style="padding:10px 16px" onclick="rechercherProduitParNom()">🔍</button>'
+    + '</div>'
+    + '<p style="font-size:11px;color:#999;margin-top:6px">Pas besoin de code-barres : recherche dans la base Open Food Facts par nom.</p>'
+    + '</div>'
+    + '<div style="border-top:1px solid #ddd;padding-top:12px;margin-top:4px">'
     + '<button class="btn-second" style="width:100%;padding:14px" onclick="ouvrirSaisieManuelleArticle()">✍️ Saisie manuelle (nom + macros)</button>'
     + '<p style="font-size:11px;color:#999;margin-top:6px">À utiliser si le produit n\'est identifiable par aucun code-barres.</p>'
     + '</div>'
@@ -2471,27 +2479,85 @@ async function chercherProduitOFF(code) {
         kcal100:null, prot100:null, gluc100:null, lip100:null };
     }
     const p = data.product;
-    const nutr = p.nutriments || {};
-    const num = v => (typeof v === "number" && !isNaN(v)) ? Math.round(v*10)/10 : null;
-    return {
-      code: code,
-      nom: p.product_name_fr || p.product_name || 'Produit sans nom',
-      marque: p.brands || '',
-      categorie: categorieDepuisOFF(p),
-      image: p.image_url || p.image_front_url || '',
-      trouve: true,
-      source: 'OFF',
-      // valeurs nutritionnelles pour 100 g/mL, quand Open Food Facts les fournit
-      kcal100: num(nutr['energy-kcal_100g']) ?? (num(nutr['energy_100g']) ? Math.round(nutr['energy_100g']/4.184) : null),
-      prot100: num(nutr['proteins_100g']),
-      gluc100: num(nutr['carbohydrates_100g']),
-      lip100: num(nutr['fat_100g']),
-      // sel en g/100g : OFF fournit soit salt_100g directement, soit sodium_100g (sel = sodium * 2.5)
-      sel100: num(nutr['salt_100g']) ?? (num(nutr['sodium_100g']) ? Math.round(nutr['sodium_100g']*2.5*100)/100 : null)
-    };
+    return mapperProduitOFFDepuisJSON(p, code);
   } catch(err) {
     return { code:code, nom:'Erreur réseau ('+code+')', marque:'—', categorie:'Autre', image:'', trouve:false };
   }
+}
+
+// Convertit un objet produit renvoyé par l'API Open Food Facts (recherche par code OU par nom)
+// vers le format utilisé par le frigo. Centralisé ici pour que le scan EAN et la recherche par
+// nom donnent exactement les mêmes champs (kcal100, prot100...).
+function mapperProduitOFFDepuisJSON(p, code){
+  const nutr = p.nutriments || {};
+  const num = v => (typeof v === "number" && !isNaN(v)) ? Math.round(v*10)/10 : null;
+  return {
+    code: code || p.code || '',
+    nom: p.product_name_fr || p.product_name || 'Produit sans nom',
+    marque: p.brands || '',
+    categorie: categorieDepuisOFF(p),
+    image: p.image_url || p.image_front_url || p.image_front_small_url || '',
+    trouve: true,
+    source: 'OFF',
+    // valeurs nutritionnelles pour 100 g/mL, quand Open Food Facts les fournit
+    kcal100: num(nutr['energy-kcal_100g']) ?? (num(nutr['energy_100g']) ? Math.round(nutr['energy_100g']/4.184) : null),
+    prot100: num(nutr['proteins_100g']),
+    gluc100: num(nutr['carbohydrates_100g']),
+    lip100: num(nutr['fat_100g']),
+    // sel en g/100g : OFF fournit soit salt_100g directement, soit sodium_100g (sel = sodium * 2.5)
+    sel100: num(nutr['salt_100g']) ?? (num(nutr['sodium_100g']) ? Math.round(nutr['sodium_100g']*2.5*100)/100 : null)
+  };
+}
+
+// ---- Recherche par NOM de produit (texte libre, sans code-barres) ----
+let resultatsRechercheNom = [];
+
+async function rechercherProduitParNom(){
+  const champ = document.getElementById('rechNom');
+  const q = champ ? champ.value.trim() : '';
+  if(!q){ toast("Entrez un nom de produit"); return; }
+  toast("🔍 Recherche « " + q + " »...");
+  try{
+    const url = 'https://world.openfoodfacts.org/cgi/search.pl?search_terms=' + encodeURIComponent(q)
+      + '&search_simple=1&action=process&json=1&page_size=15'
+      + '&fields=code,product_name,product_name_fr,brands,image_url,image_front_url,image_front_small_url,nutriments,categories_tags';
+    const res = await fetch(url);
+    const data = await res.json();
+    const produits = (data.products || [])
+      .filter(p => p.product_name || p.product_name_fr)
+      .map(p => mapperProduitOFFDepuisJSON(p, p.code));
+    if(!produits.length){ toast("❌ Aucun résultat pour « " + q + " »"); return; }
+    resultatsRechercheNom = produits;
+    afficherResultatsRechercheNom(q);
+  }catch(err){
+    console.error('Erreur recherche OFF par nom:', err);
+    toast("❌ Erreur réseau lors de la recherche");
+  }
+}
+
+function afficherResultatsRechercheNom(q){
+  let h = '<div class="sheet-hd"><h2>🔍 Résultats pour « ' + esc(q) + ' »</h2><button data-act="close">Fermer</button></div>'
+    + '<p class="hint" style="color:#666;font-size:12px;margin-bottom:10px">Touchez un produit pour le sélectionner.</p>'
+    + '<div style="max-height:400px;overflow-y:auto">';
+  resultatsRechercheNom.forEach((p, i) => {
+    h += '<div style="padding:10px;margin-bottom:8px;border:1px solid #ddd;border-radius:6px;display:flex;gap:10px;align-items:center;cursor:pointer" onclick="choisirProduitRecherche(' + i + ')">'
+      + (p.image ? '<img src="' + esc(p.image) + '" style="width:48px;height:48px;object-fit:contain;border-radius:4px;background:#f5f5f5">' : '<div style="width:48px;height:48px;background:#f5f5f5;border-radius:4px;flex-shrink:0"></div>')
+      + '<div style="flex:1">'
+      + '<div style="font-weight:600;font-size:14px">' + esc(p.nom) + '</div>'
+      + (p.marque ? '<div style="font-size:12px;color:#666">' + esc(p.marque) + '</div>' : '')
+      + '<div style="font-size:11px;color:#999">' + (p.kcal100 != null ? p.kcal100 + ' kcal/100g' : 'Valeurs nutritionnelles non fournies') + '</div>'
+      + '</div></div>';
+  });
+  h += '</div>';
+  SHEET.innerHTML = h;
+  ouvrirSheet();
+}
+
+function choisirProduitRecherche(i){
+  const p = resultatsRechercheNom[i];
+  if(!p) return;
+  produitsScannes = [p];
+  afficherProduitsScannes();
 }
 
 // Mappe les catégories OFF vers les catégories du frigo
@@ -2866,17 +2932,25 @@ async function traiterTicketOCR(imageData){
     progressBar.style.width = progress + '%';
   }, 200);
   
+  let worker = null;
   try {
-    // Étape 1 : Télécharger le modèle Tesseract
-    const { data: { text } } = await Tesseract.recognize(imageData, 'fra', {
+    // Étape 1 : créer le worker Tesseract en français
+    worker = await Tesseract.createWorker('fra', 1, {
       logger: (progress) => {
-        if(progress.status === 'recognizing'){
-          const pct = Math.round(progress.progress * 100);
+        if(progress.status === 'recognizing text'){
+          const pct = Math.round((progress.progress||0) * 100);
           progressBar.style.width = Math.max(pct, 85) + '%';
         }
       }
     });
-    
+    // PSM 4 = "une seule colonne de texte de tailles variables", adapté aux tickets de caisse.
+    // Le mode par défaut de Tesseract (PSM 3, page complète) segmente mal les tickets et
+    // produit souvent du texte illisible — c'est documenté comme une cause fréquente d'échec.
+    await worker.setParameters({ tessedit_pageseg_mode: '4' });
+
+    const { data: { text } } = await worker.recognize(imageData);
+    console.log('[OCR] Texte brut reconnu par Tesseract :', text); // diagnostic si le parsing échoue encore
+
     progressBar.style.width = '90%';
     
     // Étape 2 : Extraire les articles
@@ -2899,6 +2973,7 @@ async function traiterTicketOCR(imageData){
     progressDiv.remove();
     toast('❌ Erreur lors de la lecture du ticket');
   } finally {
+    if(worker) { try { await worker.terminate(); } catch(e){} }
     ocrEnCours = false;
   }
 }
